@@ -29,7 +29,7 @@ typedef struct tcb {
 
 static_assert(offsetof(tcb_t, rsp) == 16, "Unexpected TCB offset, correct in switch.asm");
 
-struct tcb *create_thread(void *entry, paddr cr3, bool user);
+struct tcb *create_thread(void *entry, paddr cr3);
 struct tcb *create_user_thread(uint64_t entry, paddr cr3, uint64_t user_stack);;
 struct tcb *get_thread_copy(uint16_t tid);
 struct tcb **get_thread(uint16_t tid);
