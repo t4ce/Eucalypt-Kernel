@@ -96,22 +96,13 @@ struct tcb *create_user_thread(uint64_t entry, paddr cr3, uint64_t user_stack) {
     return tcb;
 }
 
-struct tcb *create_thread(void *entry, paddr cr3, bool user) {
+struct tcb *create_thread(void *entry, paddr cr3) {
     struct stack_alloc kstack = alloc_aligned_stack(KERNEL_STACK_SIZE);
 
     if (!kstack.aligned)
         return NULL;
 
     struct stack_alloc ustack = {0};
-
-    if (user) {
-        ustack = alloc_aligned_stack(USER_STACK_SIZE);
-
-        if (!ustack.aligned) {
-            kfree(kstack.raw);
-            return NULL;
-        }
-    }
 
     struct tcb *tcb = kmalloc(sizeof(struct tcb));
 
