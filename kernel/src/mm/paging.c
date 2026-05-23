@@ -49,8 +49,9 @@ static void unmap_page(uint64_t *pml4, vaddr virt) {
     for (int level = 4; level > 1; level--) {
         int index = VADDR_TO_INDEX(virt, level);
         uint64_t entry = __atomic_load_n(&current_table[index], __ATOMIC_SEQ_CST);
-        if ((entry & ENTRY_FLAG_PRESENT) == 0)
+        if ((entry & ENTRY_FLAG_PRESENT) == 0) {
             return;
+        }
         current_table = (uint64_t *)(offset + (entry & ENTRY_4K_ADDRESS_MASK));
     }
 
@@ -82,8 +83,9 @@ uint64_t paging_get_entry(uint64_t *pml4, vaddr virt) {
     for (int level = 4; level > 1; level--) {
         int index = VADDR_TO_INDEX(virt, level);
         uint64_t entry = __atomic_load_n(&current_table[index], __ATOMIC_SEQ_CST);
-        if ((entry & ENTRY_FLAG_PRESENT) == 0)
+        if ((entry & ENTRY_FLAG_PRESENT) == 0) {
             return 0;
+        }
         current_table = (uint64_t *)(offset + (entry & ENTRY_4K_ADDRESS_MASK));
     }
 

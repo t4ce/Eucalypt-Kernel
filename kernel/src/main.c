@@ -19,6 +19,8 @@
 #include <drivers/block/ahci.h>
 #include <drivers/block/ramfs.h>
 
+extern void enable_sse();
+
 __attribute__((used, section(".limine_requests")))
 static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(6);
 
@@ -74,8 +76,9 @@ uint64_t alloc_user_stack(uint64_t *cr3) {
 }
 
 void kmain(void) {
-    if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false)
+    if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false) {
         hcf();
+    }
 
     printk_init();
     gdt_init();
@@ -96,6 +99,7 @@ void kmain(void) {
     log_info("AHCI initialized\n");
     ramfs_init();
     log_info("Ramfs initialized\n");
+    enable_sse();
 
     scheduler_init();
 
@@ -111,10 +115,6 @@ void kmain(void) {
 
     paddr user_cr3 = paging_create_pml4();
     uint64_t entry = elf64_parse(app->data, user_cr3);
-    if (entry == 0) {
-        log_error("Failed to parse user application\n");
-        hcf();
-    }
 
     log_info("Creating user thread: entry=%llx cr3=%llx\n", entry, user_cr3);
     create_user_thread(entry, user_cr3);

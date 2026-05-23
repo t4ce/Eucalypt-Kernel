@@ -58,9 +58,11 @@ isr_common:
     push r13
     push r14
     push r15
+
     mov rdi, rsp
     call isr_handler
     mov rsp, rax
+
     pop r15
     pop r14
     pop r13
@@ -98,20 +100,20 @@ apic_handler:
     mov rdi, rsp
     call apic_interrupt
     mov rsp, rax
-    pop r15
-    pop r14
-    pop r13
+    pop r15 
+    pop r14 
+    pop r13 
     pop r12
-    pop r11
-    pop r10
-    pop r9
+    pop r11 
+    pop r10 
+    pop r9  
     pop r8
-    pop rbp
-    pop rdi
-    pop rsi
+    pop rbp 
+    pop rdi 
+    pop rsi 
     pop rdx
-    pop rcx
-    pop rbx
+    pop rcx 
+    pop rbx 
     pop rax
     iretq
 
@@ -132,12 +134,15 @@ int128_handler:
     push r12
     push r13
     push r14
-    push r1
-    mov rdi, [rsp + iframe.rax]   ; syscall number 1st C arg
-    mov rsi, [rsp + iframe.rdi]   ; arg0           2nd C arg
-    mov rdx, [rsp + iframe.rsi]   ; arg1           3rd C arg
-    mov rcx, [rsp + iframe.rdx]   ; arg2           4th C arg
+    push r15
+
+    mov rdi, [rsp + iframe.rax]
+    mov rsi, [rsp + iframe.rdi]
+    mov rdx, [rsp + iframe.rsi]
+    mov rcx, [rsp + iframe.rdx]
+
     call do_syscall
+
     mov [rsp + iframe.rax], rax
     pop r15
     pop r14

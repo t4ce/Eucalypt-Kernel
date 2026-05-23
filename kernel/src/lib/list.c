@@ -36,13 +36,17 @@ void list_push_back(list_t *list, list_node_t *node) {
 
 list_node_t *list_pop_front(list_t *list) {
     list_node_t *node = list->head;
-    if(node != nullptr) list_node_delete(list, node);
+    if(node != nullptr) {
+        list_node_delete(list, node);
+    }
     return node;
 }
 
 list_node_t *list_pop_back(list_t *list) {
     list_node_t *node = list->tail;
-    if(node != nullptr) list_node_delete(list, node);
+    if(node != nullptr) {
+        list_node_delete(list, node);
+    }
     return node;
 }
 
@@ -53,9 +57,13 @@ void list_node_append(list_t *list, list_node_t *pos, list_node_t *node) {
     node->prev = pos;
 
     pos->next = node;
-    if(node->next != nullptr) node->next->prev = node;
+    if(node->next != nullptr) {
+        node->next->prev = node;
+    }
 
-    if(list->tail == pos) list->tail = node;
+    if(list->tail == pos) {
+        list->tail = node;
+    }
     list->count++;
 }
 
@@ -64,17 +72,29 @@ void list_node_prepend(list_t *list, list_node_t *pos, list_node_t *node) {
     node->prev = pos->prev;
 
     pos->prev = node;
-    if(node->prev != nullptr) node->prev->next = node;
+    if(node->prev != nullptr) {
+        node->prev->next = node;
+    }
 
-    if(list->head == pos) list->head = node;
+    if(list->head == pos) {
+        list->head = node;
+    }
     list->count++;
 }
 
 void list_node_delete(list_t *list, list_node_t *node) {
     list->count--;
-    if(list->head == node) list->head = node->next;
-    if(list->tail == node) list->tail = node->prev;
+    if(list->head == node) {
+        list->head = node->next;
+    }
+    if(list->tail == node) {
+        list->tail = node->prev;
+    }
 
-    if(node->prev != nullptr) node->prev->next = node->next;
-    if(node->next != nullptr) node->next->prev = node->prev;
+    if(node->prev != nullptr) {
+        node->prev->next = node->next;
+    }
+    if(node->next != nullptr) {
+        node->next->prev = node->prev;
+    }
 }

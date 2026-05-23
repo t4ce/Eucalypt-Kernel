@@ -25,7 +25,9 @@ uint64_t elf64_parse(void *elf, paddr cr3) {
     Elf64_Phdr *ph = (Elf64_Phdr *)((uint8_t *)elf + eh->e_phoff);
 
     for (int i = 0; i < eh->e_phnum; i++) {
-        if (ph[i].p_type != PT_LOAD) continue;
+        if (ph[i].p_type != PT_LOAD) {
+            continue;
+        }
 
         uint64_t seg_vaddr   = ph[i].p_vaddr;
         uint64_t seg_offset  = ph[i].p_offset;
@@ -37,8 +39,12 @@ uint64_t elf64_parse(void *elf, paddr cr3) {
         uint64_t pages       = (to_cover + 0xFFF) / 0x1000;
 
         uint64_t flags = ENTRY_FLAG_PRESENT | ENTRY_FLAG_USER;
-        if (ph[i].p_flags & PF_W) flags |= ENTRY_FLAG_RW;
-        if (!(ph[i].p_flags & PF_X)) flags |= ENTRY_FLAG_NX;
+        if (ph[i].p_flags & PF_W) {
+            flags |= ENTRY_FLAG_RW;
+        }
+        if (!(ph[i].p_flags & PF_X)) {
+            flags |= ENTRY_FLAG_NX;
+        }
 
         for (uint64_t p = 0; p < pages; p++) {
             uint64_t va = page_base + p * 0x1000;

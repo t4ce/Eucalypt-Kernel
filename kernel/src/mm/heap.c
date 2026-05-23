@@ -74,7 +74,9 @@ void heap_init(void) {
 }
 
 void *kmalloc(size_t size) {
-    if (!size) return NULL;
+    if (!size) {
+        return NULL;
+    }
     size = ALIGN(size);
 
     block_t *cur = free_list;
@@ -88,7 +90,9 @@ void *kmalloc(size_t size) {
                 split->free    = true;
                 split->next    = cur->next;
                 split->prev    = cur;
-                if (cur->next) cur->next->prev = split;
+                if (cur->next) {
+                    cur->next->prev = split;
+                }
                 cur->next = split;
                 cur->size = size;
             }
@@ -99,12 +103,16 @@ void *kmalloc(size_t size) {
     }
 
     block_t *blk = expand(size);
-    if (!blk) return NULL;
+    if (!blk) {
+        return NULL;
+    }
     return kmalloc(size);
 }
 
 void kfree(void *ptr) {
-    if (!ptr) return;
+    if (!ptr) {
+        return;
+    }
 
     block_t *blk = (block_t *)((uint8_t *)ptr - sizeof(block_t));
     if (blk->magic != HEAP_MAGIC) {
@@ -118,28 +126,41 @@ void kfree(void *ptr) {
     if (blk->next && blk->next->free) {
         blk->size += sizeof(block_t) + blk->next->size;
         blk->next  = blk->next->next;
-        if (blk->next) blk->next->prev = blk;
+        if (blk->next) {
+            blk->next->prev = blk;
+        }
     }
 
     // coalesce prev
     if (blk->prev && blk->prev->free) {
         blk->prev->size += sizeof(block_t) + blk->size;
         blk->prev->next  = blk->next;
-        if (blk->next) blk->next->prev = blk->prev;
+        if (blk->next) {
+            blk->next->prev = blk->prev;
+        }
     }
 }
 
 void *krealloc(void *ptr, size_t size) {
-    if (!ptr)   return kmalloc(size);
-    if (!size)  { kfree(ptr); return NULL; }
+    if (!ptr) {
+        return kmalloc(size);
+    }
+    if (!size) {
+        kfree(ptr);
+        return NULL;
+    }
 
     block_t *blk = (block_t *)((uint8_t *)ptr - sizeof(block_t));
     size = ALIGN(size);
 
-    if (blk->size >= size) return ptr;
+    if (blk->size >= size) {
+        return ptr;
+    }
 
     void *new = kmalloc(size);
-    if (!new) return NULL;
+    if (!new) {
+        return NULL;
+    }
     memcpy(new, ptr, blk->size);
     kfree(ptr);
     return new;

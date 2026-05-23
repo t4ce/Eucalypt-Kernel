@@ -164,8 +164,12 @@ int format(format_writer_t writer, const char *format, va_list list) {
             case '#': flags |= FLAG_ALTERNATIVE; break;
             case '0': flags |= FLAG_ZERO; break;
             default:
-                if(flags & FLAG_SIGN) flags &= ~FLAG_SPACE;
-                if(flags & FLAG_LEFT) flags &= ~FLAG_ZERO;
+                if(flags & FLAG_SIGN) {
+                    flags &= ~FLAG_SPACE;
+                }
+                if(flags & FLAG_LEFT) {
+                    flags &= ~FLAG_ZERO;
+                }
                 goto lbl_width;
         }
         fmt++;
@@ -194,7 +198,9 @@ int format(format_writer_t writer, const char *format, va_list list) {
     goto lbl_done;
 
     lbl_precision:
-    if(*fmt != '.') goto lbl_length;
+    if(*fmt != '.') {
+        goto lbl_length;
+    }
     flags &= ~FLAG_ZERO;
     precision = 0;
     fmt++;
@@ -241,10 +247,16 @@ int format(format_writer_t writer, const char *format, va_list list) {
 
     lbl_modifiers:
     uint8_t index = *fmt;
-    if(index < 'a') index += ('a' - 'A');
+    if(index < 'a') {
+        index += ('a' - 'A');
+    }
     uint8_t size = g_lookup[length_prefix][HASH(index)];
-    if(!size) size = g_lookup[L_NONE][HASH(index)];
-    if(!size) goto lbl_invalid;
+    if(!size) {
+        size = g_lookup[L_NONE][HASH(index)];
+    }
+    if(!size) {
+        goto lbl_invalid;
+    }
 
     switch(size) {
         case INT:       value.integer = va_arg(list, signed int); break;
@@ -269,54 +281,93 @@ int format(format_writer_t writer, const char *format, va_list list) {
     while(*fmt) {
         switch(*fmt) {
             case 'c':
-                if(!(flags & FLAG_LEFT)) for(int i = 1; i < width; i++) PUTCHAR(writer, ' ', count);
+                if(!(flags & FLAG_LEFT)) {
+                    for(int i = 1; i < width; i++) {
+                        PUTCHAR(writer, ' ', count);
+                    }
+                }
                 PUTCHAR(writer, (unsigned char) value.integer, count);
-                if(flags & FLAG_LEFT) for(int i = 1; i < width; i++) PUTCHAR(writer, ' ', count);
+                if(flags & FLAG_LEFT) {
+                    for(int i = 1; i < width; i++) {
+                        PUTCHAR(writer, ' ', count);
+                    }
+                }
                 fmt++;
                 goto lbl_normal;
             case 's':
                 char *str = (char *) value.pointer;
                 int length = 0;
                 while(str[length]) ++length;
-                if(precision >= 0 && precision < length) length = precision;
-                if(!(flags & FLAG_LEFT)) for(int i = length; i < width; i++) PUTCHAR(writer, ' ', count);
-                for(int i = 0; i < length; i++) PUTCHAR(writer, str[i], count);
-                if(flags & FLAG_LEFT) for(int i = length; i < width; i++) PUTCHAR(writer, ' ', count);
+                if(precision >= 0 && precision < length) {
+                    length = precision;
+                }
+                if(!(flags & FLAG_LEFT)) {
+                    for(int i = length; i < width; i++) {
+                        PUTCHAR(writer, ' ', count);
+                    }
+                }
+                for(int i = 0; i < length; i++) {
+                    PUTCHAR(writer, str[i], count);
+                }
+                if(flags & FLAG_LEFT) {
+                    for(int i = length; i < width; i++) {
+                        PUTCHAR(writer, ' ', count);
+                    }
+                }
                 fmt++;
                 goto lbl_normal;
             case 'X':
                 flags |= FLAG_UPPERCASE;
                 [[fallthrough]];
             case 'x':
-                if(precision < 0) precision = 1;
+                if(precision < 0) {
+                    precision = 1;
+                }
                 if(flags & FLAG_ALTERNATIVE) {
-                    if(flags & FLAG_UPPERCASE) prefix_offset = 4;
-                    else prefix_offset = 1;
-                } else prefix_offset = 0;
+                    if(flags & FLAG_UPPERCASE) {
+                        prefix_offset = 4;
+                    } else {
+                        prefix_offset = 1;
+                    }
+                } else {
+                    prefix_offset = 0;
+                }
                 radix = 16;
                 negative = false;
                 flags |= FLAG_NO_PREFIX_ON_ZERO;
                 goto lbl_print_number;
             case 'u':
-                if(precision < 0) precision = 1;
+                if(precision < 0) {
+                    precision = 1;
+                }
                 prefix_offset = 0;
                 radix = 10;
                 negative = false;
                 goto lbl_print_number;
             case 'o':
-                if(precision < 0) precision = 1;
+                if(precision < 0) {
+                    precision = 1;
+                }
                 prefix_offset = 0;
                 radix = 8;
                 negative = false;
-                if(flags & FLAG_ALTERNATIVE) flags |= FLAG_LEADING_ZERO;
+                if(flags & FLAG_ALTERNATIVE) {
+                    flags |= FLAG_LEADING_ZERO;
+                }
                 flags |= FLAG_NO_PREFIX_ON_ZERO;
                 goto lbl_print_number;
             case 'd':
             case 'i':
-                if(precision < 0) precision = 1;
-                if(flags & FLAG_SIGN) prefix_offset = 7;
-                else if(flags & FLAG_SPACE) prefix_offset = 9;
-                else prefix_offset = 0;
+                if(precision < 0) {
+                    precision = 1;
+                }
+                if(flags & FLAG_SIGN) {
+                    prefix_offset = 7;
+                } else if(flags & FLAG_SPACE) {
+                    prefix_offset = 9;
+                } else {
+                    prefix_offset = 0;
+                }
                 radix = 10;
                 goto lbl_print_signed_number;
             default: goto lbl_invalid;
@@ -326,7 +377,9 @@ int format(format_writer_t writer, const char *format, va_list list) {
 
     lbl_print_signed_number:
     negative = ((intmax_t) value.integer) < 0;
-    if(negative) value.integer = -value.integer;
+    if(negative) {
+        value.integer = -value.integer;
+    }
 
     lbl_print_number:
     fmt++;
@@ -337,18 +390,44 @@ int format(format_writer_t writer, const char *format, va_list list) {
         length++;
     }
     int precision_pad = 0;
-    if(precision > length) precision_pad = precision - length;
-    if(precision_pad == 0 && (flags & FLAG_LEADING_ZERO) && (value.integer != 0 || !(flags & FLAG_NO_PREFIX_ON_ZERO))) precision_pad = 1;
+    if(precision > length) {
+        precision_pad = precision - length;
+    }
+    if(precision_pad == 0 && (flags & FLAG_LEADING_ZERO) && (value.integer != 0 || !(flags & FLAG_NO_PREFIX_ON_ZERO))) {
+        precision_pad = 1;
+    }
     length += precision_pad;
-    if(negative) length++;
-    else if(!(flags & FLAG_NO_PREFIX_ON_ZERO) || value.integer != 0) for(int i = prefix_offset; g_prefixes[i]; i++) length++;
+    if(negative) {
+        length++;
+    } else if(!(flags & FLAG_NO_PREFIX_ON_ZERO) || value.integer != 0) {
+        for(int i = prefix_offset; g_prefixes[i]; i++) {
+            length++;
+        }
+    }
 
-    if(!(flags & (FLAG_LEFT | FLAG_ZERO))) for(int i = length; i < width; i++) PUTCHAR(writer, ' ', count);
-    if(!length) goto lbl_normal;
-    if(negative) PUTCHAR(writer, '-', count);
-    else if(!(flags & FLAG_NO_PREFIX_ON_ZERO) || value.integer != 0) while(g_prefixes[prefix_offset]) PUTCHAR(writer, g_prefixes[prefix_offset++], count);
-    if((flags & (FLAG_ZERO | FLAG_LEFT)) == FLAG_ZERO) for(int i = length; i < width; i++) PUTCHAR(writer, '0', count);
-    for(int i = 0; i < precision_pad; i++) PUTCHAR(writer, '0', count);
+    if(!(flags & (FLAG_LEFT | FLAG_ZERO))) {
+        for(int i = length; i < width; i++) {
+            PUTCHAR(writer, ' ', count);
+        }
+    }
+    if(!length) {
+        goto lbl_normal;
+    }
+    if(negative) {
+        PUTCHAR(writer, '-', count);
+    } else if(!(flags & FLAG_NO_PREFIX_ON_ZERO) || value.integer != 0) {
+        while(g_prefixes[prefix_offset]) {
+            PUTCHAR(writer, g_prefixes[prefix_offset++], count);
+        }
+    }
+    if((flags & (FLAG_ZERO | FLAG_LEFT)) == FLAG_ZERO) {
+        for(int i = length; i < width; i++) {
+            PUTCHAR(writer, '0', count);
+        }
+    }
+    for(int i = 0; i < precision_pad; i++) {
+        PUTCHAR(writer, '0', count);
+    }
     while(pw != 0 && (precision || value.integer)) {
         uint8_t c = value.integer / pw;
         if(c >= 10) {
@@ -359,7 +438,11 @@ int format(format_writer_t writer, const char *format, va_list list) {
         value.integer %= pw;
         pw /= radix;
     }
-    if(flags & FLAG_LEFT) for(int i = length; i < width; i++) PUTCHAR(writer, ' ', count);
+    if(flags & FLAG_LEFT) {
+        for(int i = length; i < width; i++) {
+            PUTCHAR(writer, ' ', count);
+        }
+    }
     goto lbl_normal;
 
     lbl_invalid:

@@ -75,8 +75,9 @@ struct tcb *create_user_thread(uint64_t entry, paddr cr3) {
     uint64_t user_stack = alloc_user_stack(pml4);
 
     struct stack_alloc kstack = alloc_aligned_stack(KERNEL_STACK_SIZE);
-    if (!kstack.aligned)
+    if (!kstack.aligned) {
         return NULL;
+    }
 
     struct tcb *tcb = kmalloc(sizeof(struct tcb));
     if (!tcb) {
@@ -113,8 +114,9 @@ struct tcb *create_user_thread(uint64_t entry, paddr cr3) {
 
 struct tcb *create_thread(void *entry, paddr cr3) {
     struct stack_alloc kstack = alloc_aligned_stack(KERNEL_STACK_SIZE);
-    if (!kstack.aligned)
+    if (!kstack.aligned) {
         return NULL;
+    }
 
     struct tcb *tcb = kmalloc(sizeof(struct tcb));
     if (!tcb) {

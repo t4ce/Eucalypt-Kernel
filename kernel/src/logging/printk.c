@@ -35,7 +35,9 @@ static spinlock_t printk_lock = 0;
 
 void printk_init(void) {
     struct limine_framebuffer_response *fb = framebuffer_request.response;
-    if (!fb || fb->framebuffer_count == 0) return;
+    if (!fb || fb->framebuffer_count == 0) {
+        return;
+    }
     ft_ctx = flanterm_fb_init(
         NULL,
         NULL,
@@ -76,8 +78,12 @@ void printk(const char *fmt, ...) {
 }
 
 void printk_level(int level, const char *fmt, ...) {
-    if (level < LOG_LEVEL) return;
-    if (level < LOG_DEBUG || level > LOG_FATAL) level = LOG_DEBUG;
+    if (level < LOG_LEVEL) {
+        return;
+    }
+    if (level < LOG_DEBUG || level > LOG_FATAL) {
+        level = LOG_DEBUG;
+    }
     spinlock_acquire(&printk_lock);
     __asm__ volatile ("cli");
     print_char('\r');
@@ -106,13 +112,18 @@ static char fmt_buf[1024];
 static size_t fmt_buf_pos;
 
 static void buf_write_char(char c) {
-    if (fmt_buf_pos < sizeof(fmt_buf) - 1)
+    if (fmt_buf_pos < sizeof(fmt_buf) - 1) {
         fmt_buf[fmt_buf_pos++] = c;
+    }
 }
 
 void vprintk_level(int level, const char *fmt, va_list ap) {
-    if (level < LOG_LEVEL) return;
-    if (level < LOG_DEBUG || level > LOG_FATAL) level = LOG_DEBUG;
+    if (level < LOG_LEVEL) {
+        return;
+    }
+    if (level < LOG_DEBUG || level > LOG_FATAL) {
+        level = LOG_DEBUG;
+    }
     spinlock_acquire(&printk_lock);
     __asm__ volatile ("cli");
     fmt_buf_pos = 0;

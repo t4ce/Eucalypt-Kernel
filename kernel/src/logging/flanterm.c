@@ -1476,27 +1476,45 @@ static int unicode_to_cp437(uint64_t code_point) {
     if (code_point >= 0x2800 && code_point <= 0x28ff) {
         uint32_t dots = (uint32_t)(code_point - 0x2800);
 
-        if (dots == 0) return 0x20;
-        if (dots == 0xff) return 0xdb;
+        if (dots == 0) {
+            return 0x20;
+        }
+        if (dots == 0xff) {
+            return 0xdb;
+        }
 
         bool has_top = dots & 0x1b;
         bool has_bottom = dots & 0xe4;
         bool has_left = dots & 0x47;
         bool has_right = dots & 0xb8;
 
-        if (has_top && !has_bottom) return 0xdf; // ▀
-        if (has_bottom && !has_top) return 0xdc; // ▄
-        if (has_left && !has_right) return 0xdd; // ▌
-        if (has_right && !has_left) return 0xde; // ▐
+        if (has_top && !has_bottom) {
+            return 0xdf; // ▀
+        }
+        if (has_bottom && !has_top) {
+            return 0xdc; // ▄
+        }
+        if (has_left && !has_right) {
+            return 0xdd; // ▌
+        }
+        if (has_right && !has_left) {
+            return 0xde; // ▐
+        }
 
         // Count set bits for density-based shade
         uint32_t n = dots - ((dots >> 1) & 0x55);
         n = (n & 0x33) + ((n >> 2) & 0x33);
         n = (n + (n >> 4)) & 0x0f;
 
-        if (n <= 2) return 0xb0; // ░
-        if (n <= 4) return 0xb1; // ▒
-        if (n <= 6) return 0xb2; // ▓
+        if (n <= 2) {
+            return 0xb0; // ░
+        }
+        if (n <= 4) {
+            return 0xb1; // ▒
+        }
+        if (n <= 6) {
+            return 0xb2; // ▓
+        }
         return 0xdb;             // █
     }
 

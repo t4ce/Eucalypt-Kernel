@@ -16,7 +16,7 @@ typedef struct {
     char     name[256];
 } fat16_dir_entry;
 
-void *fat16_init(vfs_blockdev_t *dev);
+void   *fat16_init(vfs_blockdev_t *dev);
 uint8_t fat16_format(vfs_blockdev_t *dev, uint32_t total_sectors);
 uint8_t fat16_read(vfs_blockdev_t *dev, uint32_t lba, uint8_t count, void *buffer);
 uint8_t fat16_read_file(const void *vol_ptr, uint16_t start_cluster, uint32_t size, uint8_t *buffer, uint32_t *bytes_read);

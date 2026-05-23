@@ -52,18 +52,23 @@ struct tcb *dequeue() {
 }
 
 uintptr_t schedule(uintptr_t rsp) {
-    if (!__atomic_load_n(&enabled, __ATOMIC_ACQUIRE))
+    if (!__atomic_load_n(&enabled, __ATOMIC_ACQUIRE)) {
         return rsp;
+    }
 
     if (to_reap) {
-        if (to_reap->stack_base) kfree(to_reap->stack_base);
+        if (to_reap->stack_base) {
+            kfree(to_reap->stack_base);
+        }
         kfree(to_reap);
         to_reap = NULL;
     }
 
     if (current_thread == NULL) {
         current_thread = dequeue();
-        if (!current_thread) return rsp;
+        if (!current_thread) {
+            return rsp;
+        }
         tss.rsp0 = (uintptr_t)current_thread->stack_base + KERNEL_STACK_SIZE;
         __asm__ volatile("mov %0, %%cr3" :: "r"(current_thread->cr3));
         return current_thread->rsp;
@@ -73,13 +78,17 @@ uintptr_t schedule(uintptr_t rsp) {
         current_thread->rsp = rsp;
 
     if (current_thread->state == dead) {
-        if (current_thread->ustack_base) kfree(current_thread->ustack_base);
+        if (current_thread->ustack_base) {
+            kfree(current_thread->ustack_base);
+        }
         to_reap = current_thread;
     } else {
         enqueue(current_thread);
     }
 
-    if (tq->count == 0) return rsp;
+    if (tq->count == 0) {
+        return rsp;
+    }
 
     current_thread = dequeue();
     tss.rsp0 = (uintptr_t)current_thread->stack_base + KERNEL_STACK_SIZE;

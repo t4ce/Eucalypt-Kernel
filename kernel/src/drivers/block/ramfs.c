@@ -16,10 +16,14 @@ uint64_t ramfs_size;
 static unsigned long octal_to_ulong(const unsigned char *str, int size) {
     unsigned long val = 0;
     int i = 0;
-    while (i < size && (str[i] == ' ' || str[i] == '\0')) i++;
+    while (i < size && (str[i] == ' ' || str[i] == '\0')) {
+        i++;
+    }
     for (; i < size; i++) {
         unsigned char c = str[i];
-        if (c < '0' || c > '7') break;
+        if (c < '0' || c > '7') {
+            break;
+        }
         val = (val << 3) + (c - '0');
     }
     return val;
@@ -28,7 +32,9 @@ static unsigned long octal_to_ulong(const unsigned char *str, int size) {
 static void copy_field(char *dest, const unsigned char *src, int size, int dest_size) {
     int i = 0;
     for (; i < size && i + 1 < dest_size; i++) {
-        if (src[i] == '\0') break;
+        if (src[i] == '\0') {
+            break;
+        }
         dest[i] = src[i];
     }
     dest[i] = '\0';
@@ -39,9 +45,14 @@ static unsigned long tar_lookup(unsigned char *archive, const char *filename, ch
     for (;;) {
         int allzero = 1;
         for (int i = 0; i < 512; i++) {
-            if (ptr[i]) { allzero = 0; break; }
+            if (ptr[i]) {
+                allzero = 0;
+                break;
+            }
         }
-        if (allzero) break;
+        if (allzero) {
+            break;
+        }
 
         unsigned char type = ptr[156];
         unsigned long size = octal_to_ulong(ptr + 124, 12);
@@ -52,7 +63,9 @@ static unsigned long tar_lookup(unsigned char *archive, const char *filename, ch
         if (type == 'L' || type == 'K') {
             unsigned char *nameptr = ptr + 512;
             int namelen = (int)size;
-            if (namelen >= (int)sizeof(fullname)) namelen = sizeof(fullname) - 1;
+            if (namelen >= (int)sizeof(fullname)) {
+                namelen = sizeof(fullname) - 1;
+            }
             memcpy(fullname, nameptr, namelen);
             fullname[namelen] = '\0';
             ptr += (((size + 511) / 512) + 1) * 512;
@@ -153,9 +166,14 @@ int ramfs_list(char *archive, char *directory, char **filenames, int max_files) 
     for (;;) {
         int allzero = 1;
         for (int i = 0; i < 512; i++) {
-            if (ptr[i]) { allzero = 0; break; }
+            if (ptr[i]) {
+                allzero = 0;
+                break;
+            }
         }
-        if (allzero) break;
+        if (allzero) {
+            break;
+        }
 
         unsigned char type = ptr[156];
         unsigned long size = octal_to_ulong(ptr + 124, 12);
@@ -166,7 +184,9 @@ int ramfs_list(char *archive, char *directory, char **filenames, int max_files) 
         if (type == 'L' || type == 'K') {
             unsigned char *nameptr = ptr + 512;
             int namelen = (int)size;
-            if (namelen >= (int)sizeof(fullname)) namelen = sizeof(fullname) - 1;
+            if (namelen >= (int)sizeof(fullname)) {
+                namelen = sizeof(fullname) - 1;
+            }
             memcpy(fullname, nameptr, namelen);
             fullname[namelen] = '\0';
             ptr += (((size + 511) / 512) + 1) * 512;

@@ -66,7 +66,9 @@ int strlen(const char *s) {
 
 int strcmp(const char *a, const char *b) {
     while (*a && *b) {
-        if (*a != *b) return *a - *b;
+        if (*a != *b) {
+            return *a - *b;
+        }
         a++;
         b++;
     }

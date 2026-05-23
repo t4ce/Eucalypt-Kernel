@@ -105,7 +105,9 @@ void check_function(uint8_t bus, uint8_t device, uint8_t function, uint8_t class
 void check_device(uint8_t bus, uint8_t device) {
     uint16_t vendor = pci_check_vendor(bus, device, 0);
     // No device present
-    if (vendor == PCI_VENDOR_NONE) return;
+    if (vendor == PCI_VENDOR_NONE) {
+        return;
+    }
 
     uint8_t header_type = pci_get_header_type(bus, device, 0);
     uint8_t class_code  = pci_config_read_byte(bus, device, 0, PCI_OFFSET_CLASS_CODE);
@@ -118,7 +120,9 @@ void check_device(uint8_t bus, uint8_t device) {
     if (header_type & PCI_HEADER_MULTIFUNCTION) {
         uint8_t function;
         for (function = 1; function < 8; function++) {
-            if (pci_check_vendor(bus, device, function) == PCI_VENDOR_NONE) continue;
+            if (pci_check_vendor(bus, device, function) == PCI_VENDOR_NONE) {
+                continue;
+            }
             // Read class/subclass for this specific function, not function 0
             class_code = pci_config_read_byte(bus, device, function, PCI_OFFSET_CLASS_CODE);
             subclass   = pci_config_read_byte(bus, device, function, PCI_OFFSET_SUBCLASS);

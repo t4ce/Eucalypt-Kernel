@@ -130,10 +130,15 @@ void ide_read_buffer(unsigned char channel, unsigned char reg,
         ide_write_reg(channel, ATA_REG_CONTROL, 0x80 | channels[channel].n_ien);
 
     uint16_t port = 0;
-    if      (reg < 0x08) port = channels[channel].base  + reg - 0x00;
-    else if (reg < 0x0C) port = channels[channel].base  + reg - 0x06;
-    else if (reg < 0x0E) port = channels[channel].ctrl  + reg - 0x0A;
-    else if (reg < 0x16) port = channels[channel].bmide + reg - 0x0E;
+    if      (reg < 0x08) {
+        port = channels[channel].base  + reg - 0x00;
+    } else if (reg < 0x0C) {
+        port = channels[channel].base  + reg - 0x06;
+    } else if (reg < 0x0E) {
+        port = channels[channel].ctrl  + reg - 0x0A;
+    } else if (reg < 0x16) {
+        port = channels[channel].bmide + reg - 0x0E;
+    }
 
     asm volatile (
         "rep insl"
@@ -155,14 +160,17 @@ uint8_t ide_polling(uint8_t channel, uint32_t advanced_check) {
    if (advanced_check) {
       uint8_t state = ide_read_reg(channel, ATA_REG_STATUS);
 
-      if (state & ATA_SR_ERR)
+      if (state & ATA_SR_ERR) {
          return 2;
+      }
 
-      if (state & ATA_SR_DF)
+      if (state & ATA_SR_DF) {
          return 1;
+      }
 
-      if ((state & ATA_SR_DRQ) == 0)
+      if ((state & ATA_SR_DRQ) == 0) {
          return 3;
+      }
 
    }
 
@@ -192,7 +200,9 @@ uint8_t ide_init(uint32_t bar0, uint32_t bar1, uint32_t bar2, uint32_t bar3,
             ide_write_reg(i, ATA_REG_HDDEVSEL, 0xA0 | (j << 4));
             ide_write_reg(i, ATA_REG_COMMAND, ATA_CMD_IDENTIFY);
 
-            if (ide_polling(i, 1)) continue;
+            if (ide_polling(i, 1)) {
+                continue;
+            }
 
             ide_read_buffer(i, ATA_REG_DATA, (void*)ide_buf, 128);
 
@@ -231,14 +241,20 @@ uint8_t ide_init(uint32_t bar0, uint32_t bar1, uint32_t bar2, uint32_t bar3,
 }
 
 uint8_t ide_read(uint8_t bus, uint8_t drive, uint32_t sector, uint8_t count, void *buf) {
-    if (bus > 1 || drive > 1 || count == 0) return 1;
-    if (!ide_drive_present(bus, drive)) return 1;
+    if (bus > 1 || drive > 1 || count == 0) {
+        return 1;
+    }
+    if (!ide_drive_present(bus, drive)) {
+        return 1;
+    }
 
     uint8_t channel = bus;
     uint8_t slave = drive;
 
     ide_write_reg(channel, ATA_REG_CONTROL, channels[channel].n_ien = (ide_irq == 0) ? 1 : 0);
-    if (ide_polling(channel, 0)) return 1;
+    if (ide_polling(channel, 0)) {
+        return 1;
+    }
 
     ide_write_reg(channel, ATA_REG_FEATURES, 0);
     ide_write_reg(channel, ATA_REG_SECCOUNT0, count);
@@ -248,7 +264,9 @@ uint8_t ide_read(uint8_t bus, uint8_t drive, uint32_t sector, uint8_t count, voi
     ide_write_reg(channel, ATA_REG_HDDEVSEL, 0xE0 | (slave << 4) | (uint8_t)(sector >> 24));
     ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_READ_PIO);
 
-    if (ide_polling(channel, 1)) return 1;
+    if (ide_polling(channel, 1)) {
+        return 1;
+    }
 
     int size = count * 512 / 2;
     ide_read_buffer(channel, ATA_REG_DATA, buf, size);
@@ -257,14 +275,20 @@ uint8_t ide_read(uint8_t bus, uint8_t drive, uint32_t sector, uint8_t count, voi
 }
 
 uint8_t ide_write(uint8_t bus, uint8_t drive, uint32_t sector, uint8_t count, const void *buf) {
-    if (bus > 1 || drive > 1 || count == 0) return 1;
-    if (!ide_drive_present(bus, drive)) return 1;
+    if (bus > 1 || drive > 1 || count == 0) {
+        return 1;
+    }
+    if (!ide_drive_present(bus, drive)) {
+        return 1;
+    }
 
     uint8_t channel = bus;
     uint8_t slave = drive;
 
     ide_write_reg(channel, ATA_REG_CONTROL, channels[channel].n_ien = (ide_irq == 0) ? 1 : 0);
-    if (ide_polling(channel, 0)) return 1;
+    if (ide_polling(channel, 0)) {
+        return 1;
+    }
 
     ide_write_reg(channel, ATA_REG_FEATURES, 0);
     ide_write_reg(channel, ATA_REG_SECCOUNT0, count);
@@ -274,7 +298,9 @@ uint8_t ide_write(uint8_t bus, uint8_t drive, uint32_t sector, uint8_t count, co
     ide_write_reg(channel, ATA_REG_HDDEVSEL, 0xE0 | (slave << 4) | (uint8_t)(sector >> 24));
     ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_WRITE_PIO);
 
-    if (ide_polling(channel, 0)) return 1;
+    if (ide_polling(channel, 0)) {
+        return 1;
+    }
 
     int size = count * 512 / 2;
     asm volatile (
@@ -290,28 +316,40 @@ uint8_t ide_write(uint8_t bus, uint8_t drive, uint32_t sector, uint8_t count, co
 }
 
 uint8_t ide_drive_present(uint8_t bus, uint8_t drive) {
-    if (bus > 1 || drive > 1) return 0;
+    if (bus > 1 || drive > 1) {
+        return 0;
+    }
 
     uint8_t index = bus * 2 + drive;
-    if (index >= 4) return 0;
+    if (index >= 4) {
+        return 0;
+    }
 
     return ide_state.drives[index].present;
 }
 
 char ide_drive_letter(uint8_t bus, uint8_t drive) {
-    if (bus > 1 || drive > 1) return 0;
+    if (bus > 1 || drive > 1) {
+        return 0;
+    }
 
     uint8_t index = bus * 2 + drive;
-    if (index >= 4) return 0;
+    if (index >= 4) {
+        return 0;
+    }
 
     return ide_state.drives[index].assigned_letter;
 }
 
 void ide_set_drive_letter(uint8_t bus, uint8_t drive, char letter) {
-    if (bus > 1 || drive > 1) return;
+    if (bus > 1 || drive > 1) {
+        return;
+    }
 
     uint8_t index = bus * 2 + drive;
-    if (index >= 4) return;
+    if (index >= 4) {
+        return;
+    }
 
     ide_state.drives[index].assigned_letter = letter;
 }

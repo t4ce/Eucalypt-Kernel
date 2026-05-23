@@ -34,7 +34,9 @@ static void pit_set_oneshot(uint16_t divisor) {
 
 static void pit_wait_ms(uint32_t ms) {
     uint32_t ticks = (PIT_BASE_HZ * ms) / 1000;
-    if (ticks > 0xFFFF) ticks = 0xFFFF;
+    if (ticks > 0xFFFF) {
+        ticks = 0xFFFF;
+    }
     pit_set_oneshot((uint16_t)ticks);
     while (1) {
         outb(PIT_COMMAND, 0xE2);
