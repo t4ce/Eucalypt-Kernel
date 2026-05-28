@@ -13,6 +13,7 @@
 #define ENTRY_FLAG_ACCESSED ((uint64_t)1 << 5)
 #define ENTRY_FLAG_DIRTY    ((uint64_t)1 << 6)
 #define ENTRY_FLAG_NX       ((uint64_t)1 << 63)
+#define ENTRY_FLAG_COW      ((uint64_t)1 << 9);
 
 #define ENTRY_4K_ADDRESS_MASK ((uint64_t)0x000FFFFFFFFFF000)
 
@@ -22,5 +23,6 @@ void paging_map_page(uint64_t *pml4, vaddr virt, paddr phys, size_t length, uint
 void paging_unmap_page(uint64_t *pml4, vaddr virt, size_t length);
 uint64_t paging_get_entry(uint64_t *pml4, vaddr virt);
 paddr paging_create_pml4();
+paddr paging_fork_pml4(paddr parent_cr3_phys);
 uint64_t *paging_get_current_pml4();
 void paging_init();

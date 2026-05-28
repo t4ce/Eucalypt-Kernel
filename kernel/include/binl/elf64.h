@@ -1,7 +1,7 @@
 #pragma once
-
 #include <stdint.h>
 #include <mm/types.h>
+#include <auxv.h>
 
 typedef uint16_t Elf64_Half;
 typedef uint32_t Elf64_Word;
@@ -178,4 +178,8 @@ typedef struct {
 #define ELF64_ST_TYPE(i)    ((i) & 0xf)
 #define ELF64_ST_INFO(b, t) (((b) << 4) + ((t) & 0xf))
 
-uint64_t elf64_parse(void *elf, paddr cr3);
+#define PF_X 1
+#define PF_W 2
+#define PF_R 4
+
+uint64_t elf64_parse(int fd, paddr cr3, elf_load_info_t *info);

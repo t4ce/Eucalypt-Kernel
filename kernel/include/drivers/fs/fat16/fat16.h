@@ -27,4 +27,7 @@ uint8_t fat16_create_directory(const void *vol_ptr, uint16_t parent_cluster, con
 uint8_t fat16_delete_directory(const void *vol_ptr, uint16_t parent_cluster, const char *name);
 uint8_t fat16_list_directory(const void *vol_ptr, uint16_t dir_cluster, fat16_dir_entry *entries, uint16_t *count);
 uint8_t fat16_find_file(const void *vol_ptr, uint16_t dir_cluster, const char *name, fat16_file_handle *handle);
+uint8_t fat16_create_dirent_update(const void *vol_ptr, uint16_t dir_cluster,
+                                   const char *name, uint16_t start_cluster,
+                                   uint32_t size);
 uint32_t fat16_get_volume_id(const void *vol_ptr);

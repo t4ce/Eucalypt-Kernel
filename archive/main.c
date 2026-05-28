@@ -96,14 +96,12 @@ static void check(const char *name, int64_t result, int64_t expected) {
 }
 
 void _start(void) {
-    write_str(STDOUT, "=== VFS test suite ===\n");
+    __asm__ volatile ("andq $-16, %rsp");
 
-    write_str(STDOUT, "\n-- stdout/stderr --\n");
     write_str(STDOUT, "hello from fd 1 (stdout)\n");
     write_str(STDERR, "hello from fd 2 (stderr)\n");
 
-    write_str(STDOUT, "\n-- open/write/close --\n");
-    int64_t fd = syscall(SYS_OPEN, (uint64_t)"/C:/hello.txt",
+    int64_t fd = syscall(SYS_OPEN, (uint64_t)"/hello.txt",
                          VFS_O_WRONLY | VFS_O_CREAT | VFS_O_TRUNC, 0);
     check("open creat", fd >= 0 ? 0 : fd, 0);
 
@@ -120,14 +118,14 @@ void _start(void) {
         check("close", c, 0);
     }
 
-    write_str(STDOUT, "\n-- open/seek/read --\n");
-    fd = syscall(SYS_OPEN, (uint64_t)"/C:/hello.txt", VFS_O_RDONLY, 0);
+    fd = syscall(SYS_OPEN, (uint64_t)"/hello.txt", VFS_O_RDONLY, 0);
     check("open rdonly", fd >= 0 ? 0 : fd, 0);
 
     if (fd >= 0) {
         char buf[64];
         for (int i = 0; i < 64; i++) buf[i] = 0;
 
+        write_str(STDOUT, "Reading");
         int64_t r = syscall(SYS_READ, fd, (uint64_t)buf, 12);
         check("read 12 bytes", r, 12);
 
@@ -149,10 +147,9 @@ void _start(void) {
         int64_t c = syscall(SYS_CLOSE, fd, 0, 0);
         check("close rdonly", c, 0);
     }
-
     write_str(STDOUT, "\n-- stat --\n");
     vfs_stat_t st;
-    int64_t s = syscall(SYS_STAT, (uint64_t)"/C:/hello.txt", (uint64_t)&st, 0);
+    int64_t s = syscall(SYS_STAT, (uint64_t)"/hello.txt", (uint64_t)&st, 0);
     check("stat returns 0", s, 0);
     if (s == 0) {
         check("stat size", st.size, 12);
@@ -161,8 +158,7 @@ void _start(void) {
         write_char(STDOUT, '\n');
     }
 
-    write_str(STDOUT, "\n-- fstat --\n");
-    fd = syscall(SYS_OPEN, (uint64_t)"/C:/hello.txt", VFS_O_RDONLY, 0);
+    fd = syscall(SYS_OPEN, (uint64_t)"/hello.txt", VFS_O_RDONLY, 0);
     if (fd >= 0) {
         vfs_stat_t fst;
         int64_t fs = syscall(SYS_FSTAT, fd, (uint64_t)&fst, 0);
@@ -172,16 +168,16 @@ void _start(void) {
     }
 
     write_str(STDOUT, "\n-- mkdir/readdir --\n");
-    int64_t md = syscall(SYS_MKDIR, (uint64_t)"/C:/testdir", 0, 0);
+    int64_t md = syscall(SYS_MKDIR, (uint64_t)"/testdir", 0, 0);
     check("mkdir", md, 0);
 
-    fd = syscall(SYS_OPEN, (uint64_t)"/C:/testdir/inner.txt",
+    fd = syscall(SYS_OPEN, (uint64_t)"/testdir/inner.txt",
                  VFS_O_WRONLY | VFS_O_CREAT | VFS_O_TRUNC, 0);
     check("create file in subdir", fd >= 0 ? 0 : fd, 0);
     if (fd >= 0) syscall(SYS_CLOSE, fd, 0, 0);
 
     vfs_dirent_t dent;
-    int64_t rd = syscall(SYS_READDIR, (uint64_t)"/C:/testdir", 0, (uint64_t)&dent);
+    int64_t rd = syscall(SYS_READDIR, (uint64_t)"/testdir", 0, (uint64_t)&dent);
     check("readdir index 0", rd, 0);
     if (rd == 0) {
         write_str(STDOUT, "readdir[0]: ");
@@ -189,8 +185,7 @@ void _start(void) {
         write_char(STDOUT, '\n');
     }
 
-    write_str(STDOUT, "\n-- dup/dup2 --\n");
-    fd = syscall(SYS_OPEN, (uint64_t)"/C:/hello.txt", VFS_O_RDONLY, 0);
+    fd = syscall(SYS_OPEN, (uint64_t)"/hello.txt", VFS_O_RDONLY, 0);
     if (fd >= 0) {
         int64_t fd2 = syscall(SYS_DUP, fd, 0, 0);
         check("dup returns new fd", fd2 != fd ? 0 : -1, 0);
@@ -206,21 +201,20 @@ void _start(void) {
     }
 
     write_str(STDOUT, "\n-- unlink --\n");
-    int64_t ul = syscall(SYS_UNLINK, (uint64_t)"/C:/hello.txt", 0, 0);
+    int64_t ul = syscall(SYS_UNLINK, (uint64_t)"/hello.txt", 0, 0);
     check("unlink", ul, 0);
 
     vfs_stat_t gone;
-    int64_t sg = syscall(SYS_STAT, (uint64_t)"/C:/hello.txt", (uint64_t)&gone, 0);
+    int64_t sg = syscall(SYS_STAT, (uint64_t)"/hello.txt", (uint64_t)&gone, 0);
     check("stat after unlink fails", sg, -1);
 
     write_str(STDOUT, "\n-- rmdir --\n");
-    int64_t ul2 = syscall(SYS_UNLINK, (uint64_t)"/C:/testdir/inner.txt", 0, 0);
+    int64_t ul2 = syscall(SYS_UNLINK, (uint64_t)"/testdir/inner.txt", 0, 0);
     check("unlink inner.txt", ul2, 0);
 
-    int64_t rm = syscall(SYS_RMDIR, (uint64_t)"/C:/testdir", 0, 0);
+    int64_t rm = syscall(SYS_RMDIR, (uint64_t)"/testdir", 0, 0);
     check("rmdir", rm, 0);
 
-    write_str(STDOUT, "\n-- /dev nodes --\n");
     int64_t nfd = syscall(SYS_OPEN, (uint64_t)"/dev/null", VFS_O_WRONLY, 0);
     check("open /dev/null", nfd >= 0 ? 0 : nfd, 0);
     if (nfd >= 0) {
@@ -242,7 +236,9 @@ void _start(void) {
         syscall(SYS_CLOSE, zfd, 0, 0);
     }
 
-    write_str(STDOUT, "\n=== done ===\n");
+    write_char(STDERR, 'A');
+    write_char(STDERR, 'B');
+    write_char(STDERR, 'C');
 
     for (;;) __asm__ volatile ("nop");
 }

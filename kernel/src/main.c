@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <limine.h>
+#include <logging/flanterm.h>
 #include <logging/printk.h>
 #include <gdt/gdt.h>
 #include <idt/idt.h>
@@ -11,6 +12,7 @@
 #include <mm/heap.h>
 #include <mm/types.h>
 #include <binl/elf64.h>
+#include <auxv.h>
 #include <interrupts/apic.h>
 #include <multitasking/thread.h>
 #include <multitasking/sched.h>
@@ -18,6 +20,9 @@
 #include <drivers/pci.h>
 #include <drivers/block/ahci.h>
 #include <drivers/block/ramfs.h>
+#include <drivers/fs/vfs/vfs.h>
+#include <drivers/fs/devfs/devfs.h>
+#include <drivers/tty.h>
 
 extern void enable_sse();
 
@@ -44,39 +49,38 @@ static void hcf(void) {
 
 [[gnu::noreturn]]
 void idle_thread(void) {
-    while (1) __asm__ volatile("hlt");
-}
-
-int thread_a(void) {
     while (1) {
-        log_info("Thread A running\n");
-        for (volatile int i = 0; i < 1000000; i++);
-        return -1;
-    }
-}
-
-int thread_b(void) {
-    while (1) {
-        log_info("Thread B running\n");
-        for (volatile int i = 0; i < 1000000; i++);
-        return 1;
+        __asm__ volatile("hlt");
     }
 }
 
 uint64_t alloc_user_stack(uint64_t *cr3) {
     uint64_t user_stack_base = 0x70000000000;
     uint64_t pages = 4;
-    uint64_t flags = ENTRY_FLAG_PRESENT | ENTRY_FLAG_RW | ENTRY_FLAG_NX | ENTRY_FLAG_USER;
+    uint64_t flags =
+        ENTRY_FLAG_PRESENT |
+        ENTRY_FLAG_RW      |
+        ENTRY_FLAG_NX      |
+        ENTRY_FLAG_USER;
+
     for (uint64_t i = 0; i < pages; i++) {
         paddr frame = frame_alloc();
-        vaddr virt = user_stack_base + (i * 0x1000);
+        vaddr virt  = user_stack_base + (i * 0x1000);
         paging_map_page(cr3, virt, frame, 0x1000, flags);
     }
+
     return user_stack_base + (pages * 0x1000);
 }
 
+extern struct flanterm_context *ft_ctx;
+
+void putchar(tty_t *tty, char c) {
+    (void)tty;
+    flanterm_write(ft_ctx, &c, 1);
+}
+
 void kmain(void) {
-    if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false) {
+    if (!LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision)) {
         hcf();
     }
 
@@ -97,9 +101,24 @@ void kmain(void) {
     log_info("APIC enabled\n");
     ahci_init();
     log_info("AHCI initialized\n");
-    ramfs_init();
-    log_info("Ramfs initialized\n");
     enable_sse();
+    vfs_init();
+    log_info("VFS initialized\n");
+    tty_init(putchar);
+    ramfs_init();
+
+    if (!ramfs_addr || ramfs_size == 0) {
+        log_error("No ramfs module loaded\n");
+        hcf();
+    }
+
+    uint64_t capacity = ramfs_size + (1024 * 1024);
+    uint8_t  mret     = ramfs_mount(ramfs_addr, ramfs_size, capacity);
+    if (mret != VFS_OK) {
+        log_error("Failed to mount ramfs: %d\n", mret);
+        hcf();
+    }
+    log_info("Ramfs mounted\n");
 
     scheduler_init();
 
@@ -107,21 +126,37 @@ void kmain(void) {
     create_thread(idle_thread, idle_cr3);
     log_info("Idle thread created\n");
 
-    ramfs_file_t *app = ramfs_read(ramfs_addr, "main");
-    if (!app) {
-        log_error("Failed to find user application in ramfs\n");
+    int fd = vfs_open("/ram/main", VFS_O_RDONLY);
+    if (fd < 0) {
+        log_error("Failed to open /ram/main: %d\n", fd);
         hcf();
     }
 
     paddr user_cr3 = paging_create_pml4();
-    uint64_t entry = elf64_parse(app->data, user_cr3);
+
+    elf_load_info_t info = {0};
+    uint64_t entry = elf64_parse(fd, user_cr3, &info);
+    vfs_close(fd);
+
+    if (!entry) {
+        log_error("Failed to load ELF64 binary\n");
+        hcf();
+    }
+
+    info.execfn = "/ram/main";
 
     log_info("Creating user thread: entry=%llx cr3=%llx\n", entry, user_cr3);
-    create_user_thread(entry, user_cr3);
+
+    char *argv[] = { "/ram/main", NULL };
+    char *envp[] = { "PATH=/", NULL };
+
+    create_user_thread_with_stack(entry, user_cr3, argv, envp, &info);
 
     enable_sched();
     apic_timer_init(1000);
-
     __asm__ volatile("sti");
-    for (;;) __asm__ volatile("hlt");
+
+    for (;;) {
+        __asm__ volatile("hlt");
+    }
 }

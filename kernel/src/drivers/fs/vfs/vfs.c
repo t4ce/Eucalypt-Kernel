@@ -2,14 +2,13 @@
 #include <stddef.h>
 #include <mem.h>
 #include <mm/heap.h>
-#include <logging/printk.h>
 #include <drivers/block/ahci.h>
 #include <drivers/block/nvme.h>
 #include <drivers/block/ide.h>
 #include <drivers/fs/vfs/blockdev.h>
 #include <drivers/fs/fat16/fat16.h>
-#include <drivers/fs/vfs/vfs.h>
 #include <drivers/fs/devfs/devfs.h>
+#include <drivers/fs/vfs/vfs.h>
 
 #define MAX_DRIVES      254
 #define MAX_FD          256
@@ -44,7 +43,7 @@ static int fd_alloc(void) {
     return -1;
 }
 
-static vfs_node_t *vfs_node_alloc(const char *name, uint32_t type) {
+vfs_node_t *vfs_node_alloc(const char *name, uint32_t type) {
     vfs_node_t *node = kmalloc(sizeof(vfs_node_t));
     if (!node) {
         return NULL;
@@ -64,13 +63,13 @@ static vfs_node_t *vfs_node_alloc(const char *name, uint32_t type) {
     return node;
 }
 
-static void vfs_node_link_child(vfs_node_t *parent, vfs_node_t *child) {
+void vfs_node_link_child(vfs_node_t *parent, vfs_node_t *child) {
     child->parent = parent;
     child->next   = parent->children;
     parent->children = child;
 }
 
-static void vfs_node_unlink_child(vfs_node_t *parent, vfs_node_t *child) {
+void vfs_node_unlink_child(vfs_node_t *parent, vfs_node_t *child) {
     vfs_node_t **cur = &parent->children;
     while (*cur) {
         if (*cur == child) {
@@ -83,7 +82,7 @@ static void vfs_node_unlink_child(vfs_node_t *parent, vfs_node_t *child) {
     }
 }
 
-static vfs_node_t *vfs_node_find_child(vfs_node_t *parent, const char *name) {
+vfs_node_t *vfs_node_find_child(vfs_node_t *parent, const char *name) {
     for (vfs_node_t *c = parent->children; c; c = c->next) {
         if (strcmp(c->name, name) == 0) {
             return c;
@@ -92,7 +91,7 @@ static vfs_node_t *vfs_node_find_child(vfs_node_t *parent, const char *name) {
     return NULL;
 }
 
-static vfs_node_t *vfs_resolve_path(const char *path) {
+vfs_node_t *vfs_resolve_path(const char *path) {
     if (!path || !vfs_root) return NULL;
 
     if (path[0] != '/') return NULL;
@@ -139,7 +138,7 @@ static vfs_node_t *vfs_resolve_path(const char *path) {
     return node;
 }
 
-static vfs_node_t *vfs_resolve_parent(const char *path, char *name_out) {
+vfs_node_t *vfs_resolve_parent(const char *path, char *name_out) {
     if (!path || path[0] != '/') return NULL;
 
     char buf[MAX_PATH];
@@ -864,6 +863,17 @@ int vfs_dup2(int old_fd, int new_fd) {
     fd_table[new_fd] = fd_table[old_fd];
     fd_table[new_fd].node->ref_count++;
     return new_fd;
+}
+
+int32_t vfs_filesize(int fd) {
+    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open)
+        return -1;
+
+    vfs_node_t *node = fd_table[fd].node;
+    if (!node)
+        return -1;
+
+    return (int32_t)node->size;
 }
 
 int32_t vfs_tell(int fd) {

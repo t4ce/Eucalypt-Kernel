@@ -1,41 +1,175 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <mm/types.h>
+#include <mem.h>
 #include <mm/heap.h>
 #include <mm/paging.h>
+#include <mm/frame.h>
 #include <multitasking/thread.h>
 #include <multitasking/sched.h>
+#include <binl/elf64.h>
+#include <drivers/fs/vfs/vfs.h>
+#include <auxv.h>
+#include <logging/printk.h>
 #include <multitasking/proc.h>
 
-uint16_t next_pid = 0;
+#define MAX_PROCS 256
+
+static struct pcb *proc_table[MAX_PROCS];
+static int32_t     next_pid = 0;
+
+struct pcb *proc_get(int32_t pid) {
+    for (int i = 0; i < MAX_PROCS; i++)
+        if (proc_table[i] && proc_table[i]->pid == pid)
+            return proc_table[i];
+    return NULL;
+}
+
+static int proc_table_insert(struct pcb *proc) {
+    for (int i = 0; i < MAX_PROCS; i++) {
+        if (!proc_table[i]) {
+            proc_table[i] = proc;
+            return 0;
+        }
+    }
+    return -1;
+}
 
 struct pcb *proc_create(void *entry, bool user) {
-    struct pcb *pcb = kmalloc(sizeof(struct pcb));
-    if (!pcb)
+    struct pcb *proc = kmalloc(sizeof(struct pcb));
+    if (!proc) return NULL;
+
+    memset(proc, 0, sizeof(struct pcb));
+    proc->pid        = next_pid++;
+    proc->parent_pid = -1;
+    proc->cr3        = paging_create_pml4();
+    proc->user       = user;
+    proc->state      = PROC_RUNNING;
+
+    proc->threads[0] = user
+        ? create_user_thread((uint64_t)entry, proc->cr3)
+        : create_thread(entry, proc->cr3);
+
+    if (!proc->threads[0]) {
+        kfree(proc);
         return NULL;
+    }
 
-    pcb->pid  = next_pid++;
-    pcb->cr3  = paging_create_pml4();
-    pcb->user = user;
+    proc_table_insert(proc);
+    return proc;
+}
 
-    for (int i = 0; i < MAX_THREADS; i++)
-        pcb->threads[i] = NULL;
+struct pcb *proc_fork() {
+    struct pcb *parent = proc_get(get_current_pid());
+    if (!parent) return NULL;
 
-    pcb->threads[0] = user
-        ? create_user_thread((uint64_t)entry, pcb->cr3)
-        : create_thread(entry, pcb->cr3);
+    struct pcb *child = kmalloc(sizeof(struct pcb));
+    if (!child) return NULL;
 
-    return pcb;
+    memset(child, 0, sizeof(struct pcb));
+    child->pid        = next_pid++;
+    child->parent_pid = parent->pid;
+    child->user       = parent->user;
+    child->state      = PROC_RUNNING;
+    child->heap_start = parent->heap_start;
+    child->heap_end   = parent->heap_end;
+    child->cr3        = paging_fork_pml4(parent->cr3);
+
+    for (int i = 0; i < MAX_FDS; i++)
+        child->fd_table[i] = parent->fd_table[i];
+
+    child->threads[0] = thread_fork(parent->threads[0], child->cr3);
+    if (!child->threads[0]) {
+        kfree(child);
+        return NULL;
+    }
+
+    proc_table_insert(child);
+    enqueue(child->threads[0]);
+
+    return child;
+}
+
+int proc_exec(const char *path, char **argv, char **envp) {
+    struct pcb *proc = proc_get(get_current_pid());
+    if (!proc) return -1;
+
+    int fd = vfs_open(path, 0);
+    if (fd < 0) return -1;
+
+    elf_load_info_t info = {0};
+    uintptr_t entry = elf64_parse(fd, proc->cr3, &info);
+    vfs_close(fd);
+
+    if (!entry) return -1;
+
+    info.execfn = (char *)path;
+
+    if (proc->threads[0])
+        thread_destroy(proc->threads[0]);
+
+    proc->threads[0] = create_user_thread_with_stack(entry, proc->cr3,
+                                                      argv, envp, &info);
+    if (!proc->threads[0]) return -1;
+
+    enqueue(proc->threads[0]);
+    sched_yield();
+
+    __builtin_unreachable();
+}
+
+void proc_exit(int code) {
+    struct pcb *proc = proc_get(get_current_pid());
+    if (!proc) return;
+
+    proc->state     = PROC_ZOMBIE;
+    proc->exit_code = code;
+
+    struct pcb *parent = proc_get(proc->parent_pid);
+    if (parent)
+        sched_wake(parent->threads[0]);
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (proc->threads[i])
+            thread_destroy(proc->threads[i]);
+        proc->threads[i] = NULL;
+    }
+
+    sched_yield();
+}
+
+int32_t proc_waitpid(int32_t pid, int *status, int flags) {
+    (void)flags;
+
+    struct pcb *parent = proc_get(get_current_pid());
+    if (!parent) return -1;
+
+    while (1) {
+        for (int i = 0; i < MAX_PROCS; i++) {
+            struct pcb *child = proc_table[i];
+            if (!child) continue;
+            if (child->parent_pid != parent->pid) continue;
+            if (pid != -1 && child->pid != pid) continue;
+
+            if (child->state == PROC_ZOMBIE) {
+                int32_t cpid = child->pid;
+                if (status) *status = child->exit_code;
+                proc_destroy(child);
+                proc_table[i] = NULL;
+                return cpid;
+            }
+        }
+        sched_sleep(parent->threads[0]);
+    }
 }
 
 struct pcb *add_thread(struct pcb *proc, void *entry) {
     for (int i = 0; i < MAX_THREADS; i++) {
-        if (proc->threads[i] == NULL) {
+        if (!proc->threads[i]) {
             proc->threads[i] = proc->user
                 ? create_user_thread((uint64_t)entry, proc->cr3)
                 : create_thread(entry, proc->cr3);
-            return proc;
+            return proc->threads[i] ? proc : NULL;
         }
     }
     return NULL;
@@ -46,5 +180,6 @@ void proc_destroy(struct pcb *proc) {
         if (proc->threads[i])
             thread_destroy(proc->threads[i]);
     }
+    frame_free(proc->cr3);
     kfree(proc);
 }

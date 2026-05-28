@@ -97,10 +97,73 @@ paddr paging_create_pml4() {
     uint64_t *pml4 = (uint64_t *)(offset + phys);
     memset(pml4, 0, 0x1000);
 
-    for (int i = 256; i < 512; i++)
+    for (int i = 256; i < 512; i++) {
         pml4[i] = __atomic_load_n(&kernel_pml4[i], __ATOMIC_SEQ_CST);
+    }
 
     return phys;
+}
+
+static void fork_table_recursive(uint64_t *parent_table, uint64_t *child_table, int level) {
+    for (int i = 0; i < 512; i++) {
+        uint64_t entry = __atomic_load_n(&parent_table[i], __ATOMIC_SEQ_CST);
+        
+        if (!(entry & ENTRY_FLAG_PRESENT)) {
+            continue;
+        }
+
+        bool is_huge_page = (level == 3 || level == 2) && (entry & (1ULL << 7));
+
+        if (level == 1 || is_huge_page) {
+            if (entry & ENTRY_FLAG_RW) {
+                entry &= ~ENTRY_FLAG_RW;
+                entry |= ENTRY_FLAG_COW;
+            }
+
+            __atomic_store(&child_table[i], &entry, __ATOMIC_SEQ_CST);
+            
+            __atomic_store(&parent_table[i], &entry, __ATOMIC_SEQ_CST);
+        } else {
+            uint64_t next_child_phys = frame_alloc();
+            uint64_t *next_child_table = (uint64_t *)(offset + next_child_phys);
+            memset(next_child_table, 0, 0x1000);
+
+            uint64_t *next_parent_table = (uint64_t *)(offset + (entry & ENTRY_4K_ADDRESS_MASK));
+
+            fork_table_recursive(next_parent_table, next_child_table, level - 1);
+
+            uint64_t child_entry = (entry & ~ENTRY_4K_ADDRESS_MASK) | (next_child_phys & ENTRY_4K_ADDRESS_MASK);
+            __atomic_store(&child_table[i], &child_entry, __ATOMIC_SEQ_CST);
+        }
+    }
+}
+
+paddr paging_fork_pml4(paddr parent_cr3_phys) {
+    paddr child_pml4_phys = frame_alloc();
+    uint64_t *child_pml4 = (uint64_t *)(offset + child_pml4_phys);
+    memset(child_pml4, 0, 0x1000);
+
+    uint64_t *parent_pml4 = (uint64_t *)(offset + (parent_cr3_phys & ENTRY_4K_ADDRESS_MASK));
+
+    for (int i = 0; i < 256; i++) {
+        uint64_t entry = __atomic_load_n(&parent_pml4[i], __ATOMIC_SEQ_CST);
+        if (!(entry & ENTRY_FLAG_PRESENT)) {
+            continue;
+        }
+
+        uint64_t next_child_phys = frame_alloc();
+        uint64_t *next_child_table = (uint64_t *)(offset + next_child_phys);
+        memset(next_child_table, 0, 0x1000);
+
+        uint64_t *next_parent_table = (uint64_t *)(offset + (entry & ENTRY_4K_ADDRESS_MASK));
+        
+        fork_table_recursive(next_parent_table, next_child_table, 3);
+
+        uint64_t child_entry = (entry & ~ENTRY_4K_ADDRESS_MASK) | (next_child_phys & ENTRY_4K_ADDRESS_MASK);
+        __atomic_store(&child_pml4[i], &child_entry, __ATOMIC_SEQ_CST);
+    }
+
+    return child_pml4_phys;
 }
 
 uint64_t *paging_get_current_pml4() {

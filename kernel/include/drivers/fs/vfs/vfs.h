@@ -116,6 +116,13 @@ typedef struct {
     uint16_t dir_cluster;
 } vfs_fat16_priv_t;
 
+vfs_node_t *vfs_node_alloc(const char *name, uint32_t type);
+void vfs_node_link_child(vfs_node_t *parent, vfs_node_t *child);
+void vfs_node_unlink_child(vfs_node_t *parent, vfs_node_t *child);
+vfs_node_t *vfs_node_find_child(vfs_node_t *parent, const char *name);
+vfs_node_t *vfs_resolve_path(const char *path);
+vfs_node_t *vfs_resolve_parent(const char *path, char *name_out);
+
 uint8_t     vfs_init(void);
 uint8_t     vfs_mount(StorageDevType dev, char letter, vfs_dev_addr_t addr);
 void        vfs_unmount(char letter);
@@ -130,6 +137,7 @@ int32_t vfs_seek(int fd, int32_t offset, int whence);
 int32_t vfs_tell(int fd);
 int     vfs_dup(int fd);
 int     vfs_dup2(int old_fd, int new_fd);
+int32_t vfs_filesize(int fd);
 
 int vfs_stat(const char *path, vfs_stat_t *st);
 int vfs_fstat(int fd, vfs_stat_t *st);

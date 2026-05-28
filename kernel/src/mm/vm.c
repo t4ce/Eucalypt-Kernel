@@ -185,3 +185,57 @@ void vm_space_destroy(struct vm_space *space) {
         r = next;
     }
 }
+
+uint64_t vm_mmap(struct vm_space *space, uint64_t hint, size_t size, uint64_t flags) {
+    ASSERT_NOT_NULL(space);
+    ASSERT(size > 0);
+ 
+    size = (size + 0xFFF) & ~(size_t)0xFFF;
+ 
+    uint64_t vaddr;
+    if (hint != 0 && hint % 0x1000 == 0) {
+        vaddr = hint;
+    } else {
+        ASSERT(space->next_free + size <= space->heap_end);
+        vaddr = space->next_free;
+        space->next_free += size;
+    }
+ 
+    for (size_t i = 0; i < size; i += 0x1000) {
+        uint64_t phys = frame_alloc();
+        paging_map_page(PML4_VIRT(space), vaddr + i, phys, 0x1000, flags);
+    }
+ 
+    struct vm_region *r = region_alloc(vaddr, size);
+    region_insert(space, r);
+ 
+    return vaddr;
+}
+ 
+void vm_munmap(struct vm_space *space, uint64_t vaddr, size_t size) {
+    ASSERT_NOT_NULL(space);
+    ASSERT(vaddr % 0x1000 == 0);
+    ASSERT(size > 0);
+ 
+    size = (size + 0xFFF) & ~(size_t)0xFFF;
+ 
+    for (size_t i = 0; i < size; i += 0x1000) {
+        uint64_t entry = paging_get_entry(PML4_VIRT(space), vaddr + i);
+        if (entry & ENTRY_FLAG_PRESENT)
+            frame_free(entry & ENTRY_4K_ADDRESS_MASK);
+    }
+ 
+    paging_unmap_page(PML4_VIRT(space), vaddr, size);
+ 
+    struct vm_region *r = region_remove(space, vaddr);
+    if (r)
+        frame_free((uint64_t)r - offset);
+}
+ 
+uint64_t vm_anon_alloc(struct vm_space *space, size_t size) {
+    return vm_mmap(space, 0, size, ENTRY_FLAG_PRESENT | ENTRY_FLAG_RW | ENTRY_FLAG_USER);
+}
+ 
+void vm_anon_free(struct vm_space *space, uint64_t vaddr, size_t size) {
+    vm_munmap(space, vaddr, size);
+}

@@ -3,6 +3,7 @@
 #include <mem.h>
 #include <mm/heap.h>
 #include <logging/printk.h>
+#include <drivers/tty.h>
 #include <drivers/fs/vfs/vfs.h>
 #include <drivers/fs/devfs/devfs.h>
 
@@ -108,11 +109,7 @@ static int32_t console_read(devfs_dev_t *dev, void *buf, uint32_t count) {
 
 static int32_t console_write(devfs_dev_t *dev, const void *buf, uint32_t count) {
     (void)dev;
-    const uint8_t *p = (const uint8_t *)buf;
-    for (uint32_t i = 0; i < count; i++) {
-        printk("%c", p[i]);
-    }
-    return (int32_t)count;
+    return tty_write(tty_get_active(), (const uint8_t *)buf, count);
 }
 
 static int32_t stdin_read(devfs_dev_t *dev, void *buf, uint32_t count) {

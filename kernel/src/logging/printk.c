@@ -30,7 +30,7 @@ volatile struct limine_framebuffer_request framebuffer_request = {
     .revision = 0
 };
 
-static struct flanterm_context *ft_ctx;
+struct flanterm_context *ft_ctx;
 static spinlock_t printk_lock = 0;
 
 void printk_init(void) {
@@ -67,13 +67,11 @@ static void print_str(const char *s) {
 
 void printk(const char *fmt, ...) {
     spinlock_acquire(&printk_lock);
-    __asm__ volatile ("cli");
     va_list list;
     va_start(list, fmt);
-    print_char('\r');
     format(print_char, fmt, list);
     va_end(list);
-    __asm__ volatile ("sti");
+    print_char('\r');
     spinlock_release(&printk_lock);
 }
 
@@ -85,7 +83,6 @@ void printk_level(int level, const char *fmt, ...) {
         level = LOG_DEBUG;
     }
     spinlock_acquire(&printk_lock);
-    __asm__ volatile ("cli");
     print_char('\r');
     print_str(level_color[level]);
     print_str(level_prefix[level]);
@@ -94,17 +91,13 @@ void printk_level(int level, const char *fmt, ...) {
     va_start(list, fmt);
     format(print_char, fmt, list);
     va_end(list);
-    print_char('\n');
-    __asm__ volatile ("sti");
     spinlock_release(&printk_lock);
 }
 
 void vprintk(const char *fmt, va_list ap) {
     spinlock_acquire(&printk_lock);
-    __asm__ volatile ("cli");
-    print_char('\r');
     format(print_char, fmt, ap);
-    __asm__ volatile ("sti");
+    print_char('\r');
     spinlock_release(&printk_lock);
 }
 

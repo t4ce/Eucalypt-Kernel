@@ -3,7 +3,7 @@
 
 ARCH := x86_64
 
-QEMUFLAGS := -m 2G -debugcon stdio -d int
+QEMUFLAGS := -m 2G -cpu IvyBridge -debugcon stdio -d int
 
 override IMAGE_NAME := eucalypt-$(ARCH)
 

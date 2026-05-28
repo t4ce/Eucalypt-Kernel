@@ -38,3 +38,7 @@ uint64_t vm_map_region(struct vm_space *space, struct vm_region *region, uint64_
 void vm_free(struct vm_space *space, uint64_t vaddr, size_t size);
 uint64_t vm_virt_to_phys(struct vm_space *space, uint64_t vaddr);
 bool vm_is_mapped(struct vm_space *space, uint64_t vaddr);
+uint64_t vm_mmap(struct vm_space *space, uint64_t hint, size_t size, uint64_t flags);
+void vm_munmap(struct vm_space *space, uint64_t vaddr, size_t size);
+uint64_t vm_anon_alloc(struct vm_space *space, size_t size);
+void vm_anon_free(struct vm_space *space, uint64_t vaddr, size_t size);
