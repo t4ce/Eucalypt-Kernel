@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
+#include <stdarg.h>
 #include <mem.h>
 #include <mm/heap.h>
 #include <drivers/block/ahci.h>
@@ -10,10 +11,10 @@
 #include <drivers/fs/devfs/devfs.h>
 #include <drivers/fs/vfs/vfs.h>
 
-#define MAX_DRIVES      254
-#define MAX_FD          256
-#define MAX_PATH        4096
-#define MAX_NAME        256
+#define MAX_DRIVES  254
+#define MAX_FD      256
+
+int errno = 0;
 
 static vfs_mount_t  mount_table[MAX_DRIVES];
 static uint8_t      mount_count = 0;
@@ -23,6 +24,13 @@ static vfs_file_t   fd_table[MAX_FD];
 static uint8_t      fd_ready = 0;
 
 static vfs_node_t  *vfs_root = NULL;
+static vfs_node_t  *vfs_cwd  = NULL;
+
+static uint32_t     next_ino = 1;
+
+static uint32_t alloc_ino(void) {
+    return next_ino++;
+}
 
 static void fd_table_init(void) {
     for (int i = 0; i < MAX_FD; i++) {
@@ -36,36 +44,41 @@ static void fd_table_init(void) {
 
 static int fd_alloc(void) {
     for (int i = 0; i < MAX_FD; i++) {
-        if (!fd_table[i].open) {
-            return i;
-        }
+        if (!fd_table[i].open) return i;
     }
+    errno = ENFILE;
     return -1;
 }
 
 vfs_node_t *vfs_node_alloc(const char *name, uint32_t type) {
     vfs_node_t *node = kmalloc(sizeof(vfs_node_t));
-    if (!node) {
-        return NULL;
-    }
+    if (!node) { errno = ENOSPC; return NULL; }
     memset(node, 0, sizeof(vfs_node_t));
     size_t len = strlen(name);
-    if (len >= MAX_NAME) len = MAX_NAME - 1;
+    if (len >= MAX_NAME_LEN) len = MAX_NAME_LEN - 1;
     memcpy(node->name, name, len);
-    node->name[len] = '\0';
-    node->type      = type;
-    node->ref_count = 0;
-    node->parent    = NULL;
-    node->children  = NULL;
-    node->next      = NULL;
-    node->ops       = NULL;
-    node->priv      = NULL;
+    node->name[len]  = '\0';
+    node->type       = type;
+    node->ino        = alloc_ino();
+    node->ref_count  = 0;
+    node->parent     = NULL;
+    node->children   = NULL;
+    node->next       = NULL;
+    node->ops        = NULL;
+    node->priv       = NULL;
+
+    switch (type) {
+        case VFS_NODE_DIR:  node->mode = S_IFDIR | 0755; break;
+        case VFS_NODE_DEV:  node->mode = S_IFCHR | 0600; break;
+        case VFS_NODE_SYMLINK: node->mode = S_IFLNK | 0777; break;
+        default:            node->mode = S_IFREG | 0644; break;
+    }
     return node;
 }
 
 void vfs_node_link_child(vfs_node_t *parent, vfs_node_t *child) {
-    child->parent = parent;
-    child->next   = parent->children;
+    child->parent    = parent;
+    child->next      = parent->children;
     parent->children = child;
 }
 
@@ -73,8 +86,8 @@ void vfs_node_unlink_child(vfs_node_t *parent, vfs_node_t *child) {
     vfs_node_t **cur = &parent->children;
     while (*cur) {
         if (*cur == child) {
-            *cur = child->next;
-            child->next   = NULL;
+            *cur        = child->next;
+            child->next = NULL;
             child->parent = NULL;
             return;
         }
@@ -84,35 +97,27 @@ void vfs_node_unlink_child(vfs_node_t *parent, vfs_node_t *child) {
 
 vfs_node_t *vfs_node_find_child(vfs_node_t *parent, const char *name) {
     for (vfs_node_t *c = parent->children; c; c = c->next) {
-        if (strcmp(c->name, name) == 0) {
-            return c;
-        }
+        if (strcmp(c->name, name) == 0) return c;
     }
     return NULL;
 }
 
-vfs_node_t *vfs_resolve_path(const char *path) {
-    if (!path || !vfs_root) return NULL;
-
-    if (path[0] != '/') return NULL;
-
-    vfs_node_t *node = vfs_root;
-    const char *p    = path + 1;
+static vfs_node_t *resolve_from(vfs_node_t *start, const char *path) {
+    vfs_node_t *node = start;
+    const char *p    = path;
 
     while (*p) {
-        if (*p == '/') {
-            p++;
-            continue;
-        }
-        char component[MAX_NAME];
+        if (*p == '/') { p++; continue; }
+
+        char component[MAX_NAME_LEN];
         size_t len = 0;
         while (*p && *p != '/') {
-            if (len < MAX_NAME - 1) component[len++] = *p;
+            if (len < MAX_NAME_LEN - 1) component[len++] = *p;
             p++;
         }
         component[len] = '\0';
 
-        if (strcmp(component, ".") == 0) continue;
+        if (strcmp(component, ".") == 0)  continue;
         if (strcmp(component, "..") == 0) {
             if (node->parent) node = node->parent;
             continue;
@@ -124,59 +129,131 @@ vfs_node_t *vfs_resolve_path(const char *path) {
         }
 
         vfs_node_t *child = NULL;
-
-        if (node->ops && node->ops->lookup) {
+        if (node->ops && node->ops->lookup)
             child = node->ops->lookup(node, component);
-        } else {
+        else
             child = vfs_node_find_child(node, component);
+
+        if (!child) { errno = ENOENT; return NULL; }
+
+        if (child->type == VFS_NODE_SYMLINK) {
+            if (child->ops && child->ops->readlink) {
+                char target[PATH_MAX];
+                ssize_t n = child->ops->readlink(child, target, sizeof(target) - 1);
+                if (n < 0) return NULL;
+                target[n] = '\0';
+                vfs_node_t *sym_start = (target[0] == '/') ? vfs_root : node;
+                child = resolve_from(sym_start, (target[0] == '/') ? target + 1 : target);
+                if (!child) return NULL;
+            }
         }
 
-        if (!child) return NULL;
         node = child;
     }
-
     return node;
 }
 
-vfs_node_t *vfs_resolve_parent(const char *path, char *name_out) {
-    if (!path || path[0] != '/') return NULL;
+vfs_node_t *vfs_resolve_path(const char *path) {
+    if (!path) { errno = EINVAL; return NULL; }
+    if (path[0] == '/')
+        return resolve_from(vfs_root, path + 1);
+    if (vfs_cwd)
+        return resolve_from(vfs_cwd, path);
+    errno = ENOENT;
+    return NULL;
+}
 
-    char buf[MAX_PATH];
+vfs_node_t *vfs_resolve_parent(const char *path, char *name_out) {
+    if (!path || path[0] == '\0') { errno = EINVAL; return NULL; }
+
+    char buf[PATH_MAX];
     size_t len = strlen(path);
-    if (len >= MAX_PATH) return NULL;
+    if (len >= PATH_MAX) { errno = EINVAL; return NULL; }
     memcpy(buf, path, len + 1);
 
-    char *last_slash = buf;
-    for (char *p = buf; *p; p++) {
+    char *last_slash = NULL;
+    for (char *p = buf; *p; p++)
         if (*p == '/') last_slash = p;
-    }
 
     if (name_out) {
-        size_t nlen = strlen(last_slash + 1);
-        if (nlen >= MAX_NAME) nlen = MAX_NAME - 1;
-        memcpy(name_out, last_slash + 1, nlen);
+        const char *base = last_slash ? last_slash + 1 : buf;
+        size_t nlen = strlen(base);
+        if (nlen >= MAX_NAME_LEN) nlen = MAX_NAME_LEN - 1;
+        memcpy(name_out, base, nlen);
         name_out[nlen] = '\0';
     }
 
-    if (last_slash == buf) {
+    if (!last_slash)
+        return vfs_cwd ? vfs_cwd : vfs_root;
+
+    if (last_slash == buf)
         return vfs_root;
-    }
 
     *last_slash = '\0';
     return vfs_resolve_path(buf);
 }
 
-static int find_letter_slot(char letter) {
-    for (int i = 0; i < mount_count; i++) {
-        if (mount_table[i].letter == letter) return i;
+int vfs_chdir(const char *path) {
+    vfs_node_t *node = vfs_resolve_path(path);
+    if (!node) return -1;
+    if (node->type != VFS_NODE_DIR && node->type != VFS_NODE_MOUNTPOINT) {
+        errno = ENOTDIR;
+        return -1;
     }
+    if (node->type == VFS_NODE_MOUNTPOINT) {
+        vfs_node_t *inner = (vfs_node_t *)node->priv;
+        if (inner) node = inner;
+    }
+    vfs_cwd = node;
+    return 0;
+}
+
+char *vfs_getcwd(char *buf, size_t size) {
+    if (!buf || size == 0) { errno = EINVAL; return NULL; }
+
+    char tmp[PATH_MAX];
+    size_t pos = 0;
+    tmp[pos] = '\0';
+
+    vfs_node_t *node = vfs_cwd ? vfs_cwd : vfs_root;
+    vfs_node_t *cur  = node;
+
+    char segments[64][MAX_NAME_LEN];
+    int  depth = 0;
+
+    while (cur && cur != vfs_root) {
+        if (depth >= 64) break;
+        size_t nlen = strlen(cur->name);
+        if (nlen >= MAX_NAME_LEN) nlen = MAX_NAME_LEN - 1;
+        memcpy(segments[depth++], cur->name, nlen + 1);
+        cur = cur->parent;
+    }
+
+    pos = 0;
+    tmp[pos++] = '/';
+    for (int i = depth - 1; i >= 0; i--) {
+        size_t nlen = strlen(segments[i]);
+        if (pos + nlen + 2 > PATH_MAX) { errno = ENOSPC; return NULL; }
+        memcpy(tmp + pos, segments[i], nlen);
+        pos += nlen;
+        if (i > 0) tmp[pos++] = '/';
+    }
+    tmp[pos] = '\0';
+
+    if (pos + 1 > size) { errno = ENOSPC; return NULL; }
+    memcpy(buf, tmp, pos + 1);
+    return buf;
+}
+
+static int find_letter_slot(char letter) {
+    for (int i = 0; i < mount_count; i++)
+        if (mount_table[i].letter == letter) return i;
     return -1;
 }
 
 vfs_mount_t *vfs_get_mount(char letter) {
     int slot = find_letter_slot(letter);
-    if (slot < 0) return NULL;
-    return &mount_table[slot];
+    return (slot < 0) ? NULL : &mount_table[slot];
 }
 
 static uint8_t ahci_blockdev_read(vfs_blockdev_t *dev, uint32_t lba, uint8_t count, void *buf) {
@@ -219,34 +296,35 @@ fs_t vfs_get_type(vfs_blockdev_t *blockdev) {
     return (fs_t)-1;
 }
 
-static int32_t fat16_vfs_read(vfs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buf) {
+static ssize_t fat16_vfs_read(vfs_node_t *node, void *buf, size_t count, off_t offset) {
     vfs_fat16_priv_t *priv = (vfs_fat16_priv_t *)node->priv;
-    if (!priv) return -1;
-    if (offset >= priv->size) return 0;
-    uint32_t remaining = priv->size - offset;
-    if (size > remaining) size = remaining;
+    if (!priv) { errno = EBADF; return -1; }
+    if ((size_t)offset >= priv->size) return 0;
+    size_t remaining = priv->size - (size_t)offset;
+    if (count > remaining) count = remaining;
 
     uint8_t *tmp = kmalloc(priv->size);
-    if (!tmp) return -1;
+    if (!tmp) { errno = ENOSPC; return -1; }
 
     uint32_t bytes_read = 0;
     if (fat16_read_file(priv->vol, priv->start_cluster, priv->size, tmp, &bytes_read) != 0) {
         kfree(tmp);
+        errno = EBADF;
         return -1;
     }
 
-    memcpy(buf, tmp + offset, size);
+    memcpy(buf, tmp + offset, count);
     kfree(tmp);
-    return (int32_t)size;
+    return (ssize_t)count;
 }
 
-static int32_t fat16_vfs_write(vfs_node_t *node, uint32_t offset, uint32_t size, const uint8_t *buf) {
+static ssize_t fat16_vfs_write(vfs_node_t *node, const void *buf, size_t count, off_t offset) {
     vfs_fat16_priv_t *priv = (vfs_fat16_priv_t *)node->priv;
-    if (!priv) return -1;
+    if (!priv) { errno = EBADF; return -1; }
 
-    uint32_t new_size = (offset + size > priv->size) ? offset + size : priv->size;
+    size_t new_size = ((size_t)offset + count > priv->size) ? (size_t)offset + count : priv->size;
     uint8_t *tmp = kmalloc(new_size);
-    if (!tmp) return -1;
+    if (!tmp) { errno = ENOSPC; return -1; }
     memset(tmp, 0, new_size);
 
     if (priv->size > 0) {
@@ -254,7 +332,7 @@ static int32_t fat16_vfs_write(vfs_node_t *node, uint32_t offset, uint32_t size,
         fat16_read_file(priv->vol, priv->start_cluster, priv->size, tmp, &bytes_read);
     }
 
-    memcpy(tmp + offset, buf, size);
+    memcpy(tmp + offset, buf, count);
 
     if (priv->start_cluster) {
         fat16_delete_file(priv->vol, priv->dir_cluster, node->name);
@@ -262,14 +340,16 @@ static int32_t fat16_vfs_write(vfs_node_t *node, uint32_t offset, uint32_t size,
     }
 
     uint32_t bytes_written = 0;
-    uint16_t new_cluster = priv->start_cluster;
+    uint16_t new_cluster   = priv->start_cluster;
     if (fat16_write_file(priv->vol, &new_cluster, tmp, new_size, &bytes_written) != 0) {
         kfree(tmp);
+        errno = ENOSPC;
         return -1;
     }
 
     if (fat16_create_dirent_update(priv->vol, priv->dir_cluster, node->name, new_cluster, new_size) != 0) {
         kfree(tmp);
+        errno = ENOSPC;
         return -1;
     }
 
@@ -277,12 +357,12 @@ static int32_t fat16_vfs_write(vfs_node_t *node, uint32_t offset, uint32_t size,
     priv->size          = new_size;
     node->size          = new_size;
     kfree(tmp);
-    return (int32_t)bytes_written;
+    return (ssize_t)bytes_written;
 }
 
 static int fat16_vfs_readdir(vfs_node_t *node, uint32_t index, vfs_dirent_t *out) {
     vfs_fat16_priv_t *priv = (vfs_fat16_priv_t *)node->priv;
-    if (!priv) return -1;
+    if (!priv) { errno = EBADF; return -1; }
 
     fat16_dir_entry entries[512];
     uint16_t count = 512;
@@ -290,10 +370,11 @@ static int fat16_vfs_readdir(vfs_node_t *node, uint32_t index, vfs_dirent_t *out
     if (index >= count) return -1;
 
     size_t nlen = strlen(entries[index].name);
-    if (nlen >= MAX_NAME) nlen = MAX_NAME - 1;
-    memcpy(out->name, entries[index].name, nlen);
-    out->name[nlen] = '\0';
-    out->type = (entries[index].attr & 0x10) ? VFS_NODE_DIR : VFS_NODE_FILE;
+    if (nlen >= MAX_NAME_LEN) nlen = MAX_NAME_LEN - 1;
+    memcpy(out->d_name, entries[index].name, nlen);
+    out->d_name[nlen] = '\0';
+    out->d_type = (entries[index].attr & 0x10) ? VFS_NODE_DIR : VFS_NODE_FILE;
+    out->d_ino  = 0;
     return 0;
 }
 
@@ -302,61 +383,107 @@ static vfs_node_t *fat16_vfs_lookup(vfs_node_t *dir, const char *name) {
     if (existing) return existing;
 
     vfs_fat16_priv_t *dpriv = (vfs_fat16_priv_t *)dir->priv;
-    if (!dpriv) return NULL;
+    if (!dpriv) { errno = EBADF; return NULL; }
 
     fat16_file_handle handle;
-    if (fat16_find_file(dpriv->vol, dpriv->start_cluster, name, &handle) != 0) return NULL;
+    if (fat16_find_file(dpriv->vol, dpriv->start_cluster, name, &handle) != 0) {
+        errno = ENOENT;
+        return NULL;
+    }
 
     uint32_t type = (handle.attr & 0x10) ? VFS_NODE_DIR : VFS_NODE_FILE;
     vfs_node_t *child = vfs_node_alloc(name, type);
     if (!child) return NULL;
 
     vfs_fat16_priv_t *cpriv = kmalloc(sizeof(vfs_fat16_priv_t));
-    if (!cpriv) { kfree(child); return NULL; }
+    if (!cpriv) { kfree(child); errno = ENOSPC; return NULL; }
 
-    cpriv->vol          = dpriv->vol;
+    cpriv->vol           = dpriv->vol;
     cpriv->start_cluster = handle.start_cluster;
-    cpriv->size         = handle.size;
-    cpriv->dir_cluster  = dpriv->start_cluster;
-    child->priv         = cpriv;
-    child->size         = handle.size;
-    child->ops          = dir->ops;
+    cpriv->size          = handle.size;
+    cpriv->dir_cluster   = dpriv->start_cluster;
+    child->priv          = cpriv;
+    child->size          = handle.size;
+    child->ops           = dir->ops;
 
     vfs_node_link_child(dir, child);
     return child;
 }
 
-static int fat16_vfs_create(vfs_node_t *dir, const char *name, uint32_t type) {
+static int fat16_vfs_create(vfs_node_t *dir, const char *name, uint32_t type, uint32_t mode) {
+    (void)mode;
     vfs_fat16_priv_t *dpriv = (vfs_fat16_priv_t *)dir->priv;
-    if (!dpriv) return -1;
+    if (!dpriv) { errno = EBADF; return -1; }
 
-    if (type == VFS_NODE_DIR) {
+    if (type == VFS_NODE_DIR)
         return (fat16_create_directory(dpriv->vol, dpriv->start_cluster, name) == 0) ? 0 : -1;
-    } else {
-        return (fat16_create_file(dpriv->vol, dpriv->start_cluster, name, NULL, 0) == 0) ? 0 : -1;
-    }
+    return (fat16_create_file(dpriv->vol, dpriv->start_cluster, name, NULL, 0) == 0) ? 0 : -1;
 }
 
 static int fat16_vfs_unlink(vfs_node_t *dir, const char *name) {
     vfs_fat16_priv_t *dpriv = (vfs_fat16_priv_t *)dir->priv;
-    if (!dpriv) return -1;
+    if (!dpriv) { errno = EBADF; return -1; }
     return (fat16_delete_file(dpriv->vol, dpriv->start_cluster, name) == 0) ? 0 : -1;
 }
 
 static int fat16_vfs_rmdir(vfs_node_t *dir, const char *name) {
     vfs_fat16_priv_t *dpriv = (vfs_fat16_priv_t *)dir->priv;
-    if (!dpriv) return -1;
+    if (!dpriv) { errno = EBADF; return -1; }
     return (fat16_delete_directory(dpriv->vol, dpriv->start_cluster, name) == 0) ? 0 : -1;
 }
 
+static int fat16_vfs_truncate(vfs_node_t *node, off_t length) {
+    vfs_fat16_priv_t *priv = (vfs_fat16_priv_t *)node->priv;
+    if (!priv) { errno = EBADF; return -1; }
+
+    size_t new_size = (size_t)length;
+    uint8_t *tmp = kmalloc(new_size > priv->size ? new_size : priv->size);
+    if (!tmp) { errno = ENOSPC; return -1; }
+    memset(tmp, 0, new_size > priv->size ? new_size : priv->size);
+
+    if (priv->size > 0) {
+        uint32_t bytes_read = 0;
+        fat16_read_file(priv->vol, priv->start_cluster, priv->size, tmp, &bytes_read);
+    }
+
+    if (priv->start_cluster) {
+        fat16_delete_file(priv->vol, priv->dir_cluster, node->name);
+        priv->start_cluster = 0;
+    }
+
+    uint32_t bytes_written = 0;
+    uint16_t new_cluster   = 0;
+    if (fat16_write_file(priv->vol, &new_cluster, tmp, new_size, &bytes_written) != 0) {
+        kfree(tmp);
+        errno = ENOSPC;
+        return -1;
+    }
+
+    if (fat16_create_dirent_update(priv->vol, priv->dir_cluster, node->name, new_cluster, new_size) != 0) {
+        kfree(tmp);
+        errno = ENOSPC;
+        return -1;
+    }
+
+    priv->start_cluster = new_cluster;
+    priv->size          = new_size;
+    node->size          = new_size;
+    kfree(tmp);
+    return 0;
+}
+
 static vfs_node_ops_t fat16_ops = {
-    .read    = fat16_vfs_read,
-    .write   = fat16_vfs_write,
-    .readdir = fat16_vfs_readdir,
-    .lookup  = fat16_vfs_lookup,
-    .create  = fat16_vfs_create,
-    .unlink  = fat16_vfs_unlink,
-    .rmdir   = fat16_vfs_rmdir,
+    .read     = fat16_vfs_read,
+    .write    = fat16_vfs_write,
+    .readdir  = fat16_vfs_readdir,
+    .lookup   = fat16_vfs_lookup,
+    .create   = fat16_vfs_create,
+    .unlink   = fat16_vfs_unlink,
+    .rmdir    = fat16_vfs_rmdir,
+    .truncate = fat16_vfs_truncate,
+    .rename   = NULL,
+    .symlink  = NULL,
+    .readlink = NULL,
 };
 
 uint8_t vfs_mount(StorageDevType dev, char letter, vfs_dev_addr_t addr) {
@@ -416,7 +543,7 @@ uint8_t vfs_mount(StorageDevType dev, char letter, vfs_dev_addr_t addr) {
 
     vfs_fat16_priv_t *fat_priv = kmalloc(sizeof(vfs_fat16_priv_t));
     if (!fat_priv) { kfree(mp_outer); kfree(priv); return VFS_ERR_NO_SLOTS; }
-    fat_priv->vol          = vol_ptr;
+    fat_priv->vol           = vol_ptr;
     fat_priv->start_cluster = 0;
     fat_priv->size          = 0;
     fat_priv->dir_cluster   = 0;
@@ -453,7 +580,7 @@ void vfs_unmount(char letter) {
     int slot = find_letter_slot(letter);
     if (slot < 0) return;
 
-    vfs_mount_t *m = &mount_table[slot];
+    vfs_mount_t *m     = &mount_table[slot];
     vfs_blockdev_priv_t *bpriv = (vfs_blockdev_priv_t *)m->blockdev.priv;
 
     if (m->dev == AHCI) {
@@ -479,42 +606,80 @@ void vfs_unmount(char letter) {
     mount_count--;
 }
 
-int vfs_open(const char *path, uint32_t flags) {
-    if (!vfs_ready || !fd_ready) return -1;
+static void node_to_stat(vfs_node_t *node, vfs_stat_t *st) {
+    st->st_ino     = node->ino;
+    st->st_mode    = node->mode;
+    st->st_nlink   = 1;
+    st->st_uid     = node->uid;
+    st->st_gid     = node->gid;
+    st->st_size    = node->size;
+    st->st_atime   = node->atime;
+    st->st_mtime   = node->mtime;
+    st->st_ctime   = node->ctime;
+    st->st_blksize = 512;
+    st->st_blocks  = (node->size + 511) / 512;
+}
+
+static int check_access(vfs_node_t *node, int flags) {
+    (void)node; (void)flags;
+    return 0;
+}
+
+int open(const char *path, int flags, ...) {
+    if (!vfs_ready || !fd_ready) { errno = EBADF; return -1; }
+
+    uint32_t mode = 0644;
+    if (flags & O_CREAT) {
+        va_list ap;
+        va_start(ap, flags);
+        mode = va_arg(ap, unsigned int);
+        va_end(ap);
+    }
 
     vfs_node_t *node = vfs_resolve_path(path);
 
     if (!node) {
-        if (!(flags & VFS_O_CREAT)) return -1;
+        if (!(flags & O_CREAT)) { errno = ENOENT; return -1; }
 
-        char name[MAX_NAME];
+        char name[MAX_NAME_LEN];
         vfs_node_t *parent = vfs_resolve_parent(path, name);
         if (!parent) return -1;
 
+        if (parent->type == VFS_NODE_MOUNTPOINT) {
+            vfs_node_t *inner = (vfs_node_t *)parent->priv;
+            if (inner) parent = inner;
+        }
+
         if (parent->ops && parent->ops->create) {
-            if (parent->ops->create(parent, name, VFS_NODE_FILE) != 0) return -1;
+            if (parent->ops->create(parent, name, VFS_NODE_FILE, mode) != 0) return -1;
         } else {
             vfs_node_t *new_node = vfs_node_alloc(name, VFS_NODE_FILE);
             if (!new_node) return -1;
+            new_node->mode = S_IFREG | (mode & 0777);
             vfs_node_link_child(parent, new_node);
         }
 
         node = vfs_resolve_path(path);
         if (!node) return -1;
+    } else {
+        if ((flags & O_CREAT) && (flags & O_EXCL)) { errno = EEXIST; return -1; }
+        if ((flags & O_DIRECTORY) && node->type != VFS_NODE_DIR) { errno = ENOTDIR; return -1; }
     }
 
-    if ((flags & VFS_O_TRUNC) && node->type == VFS_NODE_FILE) {
-        if (node->ops && node->ops->write) {
-            node->ops->write(node, 0, 0, NULL);
-        }
-        node->size = 0;
+    if (check_access(node, flags) != 0) { errno = EACCES; return -1; }
+
+    if ((flags & O_TRUNC) && node->type == VFS_NODE_FILE) {
+        if (node->ops && node->ops->truncate)
+            node->ops->truncate(node, 0);
+        else
+            node->size = 0;
     }
 
     int fd = fd_alloc();
     if (fd < 0) return -1;
 
     fd_table[fd].node   = node;
-    fd_table[fd].offset = (flags & VFS_O_APPEND) ? node->size : 0;
+    fd_table[fd].offset = (flags & O_APPEND) ? (off_t)node->size : 0;
     fd_table[fd].flags  = flags;
     fd_table[fd].open   = 1;
     node->ref_count++;
@@ -522,8 +687,8 @@ int vfs_open(const char *path, uint32_t flags) {
     return fd;
 }
 
-int vfs_close(int fd) {
-    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open) return -1;
+int close(int fd) {
+    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open) { errno = EBADF; return -1; }
     fd_table[fd].node->ref_count--;
     fd_table[fd].node   = NULL;
     fd_table[fd].offset = 0;
@@ -532,102 +697,138 @@ int vfs_close(int fd) {
     return 0;
 }
 
-int32_t vfs_read(int fd, void *buf, uint32_t count) {
-    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open) return -1;
-    if (!buf || count == 0) return 0;
+ssize_t read(int fd, void *buf, size_t count) {
+    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open) { errno = EBADF; return -1; }
+    if (!buf)    { errno = EINVAL; return -1; }
+    if (!count)  return 0;
+
+    if ((fd_table[fd].flags & O_WRONLY) && !(fd_table[fd].flags & O_RDWR)) {
+        errno = EACCES;
+        return -1;
+    }
 
     vfs_node_t *node = fd_table[fd].node;
-    if (!node) return -1;
+    if (!node) { errno = EBADF; return -1; }
 
     if (node->type == VFS_NODE_DEV) {
         devfs_dev_t *ddev = (devfs_dev_t *)node->priv;
         if (ddev && ddev->read) {
-            int32_t n = ddev->read(ddev, buf, count);
+            ssize_t n = ddev->read(ddev, buf, count);
             if (n > 0) fd_table[fd].offset += n;
             return n;
         }
+        errno = EBADF;
         return -1;
     }
 
-    if (!node->ops || !node->ops->read) return -1;
-    int32_t n = node->ops->read(node, fd_table[fd].offset, count, (uint8_t *)buf);
+    if (!node->ops || !node->ops->read) { errno = EBADF; return -1; }
+    ssize_t n = node->ops->read(node, buf, count, fd_table[fd].offset);
     if (n > 0) fd_table[fd].offset += n;
     return n;
 }
 
-int32_t vfs_write(int fd, const void *buf, uint32_t count) {
-    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open) return -1;
-    if (!buf || count == 0) return 0;
+ssize_t write(int fd, const void *buf, size_t count) {
+    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open) { errno = EBADF; return -1; }
+    if (!buf)   { errno = EINVAL; return -1; }
+    if (!count) return 0;
+
+    int acc = fd_table[fd].flags & O_RDWR;
+    if (acc == O_RDONLY) { errno = EACCES; return -1; }
 
     vfs_node_t *node = fd_table[fd].node;
-    if (!node) return -1;
+    if (!node) { errno = EBADF; return -1; }
+
+    if (fd_table[fd].flags & O_APPEND)
+        fd_table[fd].offset = (off_t)node->size;
 
     if (node->type == VFS_NODE_DEV) {
         devfs_dev_t *ddev = (devfs_dev_t *)node->priv;
         if (ddev && ddev->write) {
-            int32_t n = ddev->write(ddev, buf, count);
+            ssize_t n = ddev->write(ddev, buf, count);
             if (n > 0) fd_table[fd].offset += n;
             return n;
         }
+        errno = EBADF;
         return -1;
     }
 
-    if (!node->ops || !node->ops->write) return -1;
-    int32_t n = node->ops->write(node, fd_table[fd].offset, count, (const uint8_t *)buf);
+    if (!node->ops || !node->ops->write) { errno = EBADF; return -1; }
+    ssize_t n = node->ops->write(node, buf, count, fd_table[fd].offset);
     if (n > 0) fd_table[fd].offset += n;
     return n;
 }
 
-int32_t vfs_seek(int fd, int32_t offset, int whence) {
-    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open) return -1;
+off_t lseek(int fd, off_t offset, int whence) {
+    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open) { errno = EBADF; return -1; }
     vfs_node_t *node = fd_table[fd].node;
-    if (!node) return -1;
+    if (!node) { errno = EBADF; return -1; }
 
-    int32_t new_offset;
+    off_t new_offset;
     switch (whence) {
-        case VFS_SEEK_SET: new_offset = offset; break;
-        case VFS_SEEK_CUR: new_offset = (int32_t)fd_table[fd].offset + offset; break;
-        case VFS_SEEK_END: new_offset = (int32_t)node->size + offset; break;
-        default: return -1;
+        case SEEK_SET: new_offset = offset; break;
+        case SEEK_CUR: new_offset = fd_table[fd].offset + offset; break;
+        case SEEK_END: new_offset = (off_t)node->size + offset; break;
+        default: errno = EINVAL; return -1;
     }
 
-    if (new_offset < 0) return -1;
-    fd_table[fd].offset = (uint32_t)new_offset;
+    if (new_offset < 0) { errno = EINVAL; return -1; }
+    fd_table[fd].offset = new_offset;
     return new_offset;
 }
 
-int vfs_stat(const char *path, vfs_stat_t *st) {
-    if (!st) return -1;
+int stat(const char *path, vfs_stat_t *st) {
+    if (!st) { errno = EINVAL; return -1; }
     vfs_node_t *node = vfs_resolve_path(path);
     if (!node) return -1;
-
-    st->type  = node->type;
-    st->size  = node->size;
-    st->flags = node->flags;
-    size_t nlen = strlen(node->name);
-    if (nlen >= MAX_NAME) nlen = MAX_NAME - 1;
-    memcpy(st->name, node->name, nlen);
-    st->name[nlen] = '\0';
+    node_to_stat(node, st);
     return 0;
 }
 
-int vfs_fstat(int fd, vfs_stat_t *st) {
-    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open || !st) return -1;
+int lstat(const char *path, vfs_stat_t *st) {
+    if (!st) { errno = EINVAL; return -1; }
+    if (!path) { errno = EINVAL; return -1; }
+
+    char buf[PATH_MAX];
+    size_t len = strlen(path);
+    if (len >= PATH_MAX) { errno = EINVAL; return -1; }
+    memcpy(buf, path, len + 1);
+
+    char *last_slash = NULL;
+    for (char *p = buf; *p; p++)
+        if (*p == '/') last_slash = p;
+
+    const char *base = last_slash ? last_slash + 1 : buf;
+    char parent_path[PATH_MAX];
+    if (last_slash) {
+        size_t plen = (size_t)(last_slash - buf);
+        if (plen == 0) plen = 1;
+        memcpy(parent_path, buf, plen);
+        parent_path[plen] = '\0';
+    } else {
+        parent_path[0] = '.';
+        parent_path[1] = '\0';
+    }
+
+    vfs_node_t *parent = vfs_resolve_path(parent_path);
+    if (!parent) return -1;
+
+    vfs_node_t *node = vfs_node_find_child(parent, base);
+    if (!node) { errno = ENOENT; return -1; }
+
+    node_to_stat(node, st);
+    return 0;
+}
+
+int fstat(int fd, vfs_stat_t *st) {
+    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open || !st) { errno = EBADF; return -1; }
     vfs_node_t *node = fd_table[fd].node;
-    if (!node) return -1;
-
-    st->type  = node->type;
-    st->size  = node->size;
-    st->flags = node->flags;
-    size_t nlen = strlen(node->name);
-    if (nlen >= MAX_NAME) nlen = MAX_NAME - 1;
-    memcpy(st->name, node->name, nlen);
-    st->name[nlen] = '\0';
+    if (!node) { errno = EBADF; return -1; }
+    node_to_stat(node, st);
     return 0;
 }
 
-int vfs_mkdir(const char *path) {
-    char name[MAX_NAME];
+int mkdir(const char *path, uint32_t mode) {
+    char name[MAX_NAME_LEN];
     vfs_node_t *parent = vfs_resolve_parent(path, name);
     if (!parent) return -1;
 
@@ -636,23 +837,28 @@ int vfs_mkdir(const char *path) {
         if (inner) parent = inner;
     }
 
-    if (parent->ops && parent->ops->create) {
-        return parent->ops->create(parent, name, VFS_NODE_DIR);
-    }
+    if (vfs_node_find_child(parent, name)) { errno = EEXIST; return -1; }
+
+    if (parent->ops && parent->ops->create)
+        return parent->ops->create(parent, name, VFS_NODE_DIR, mode);
 
     vfs_node_t *node = vfs_node_alloc(name, VFS_NODE_DIR);
     if (!node) return -1;
+    node->mode = S_IFDIR | (mode & 0777);
     vfs_node_link_child(parent, node);
     return 0;
 }
 
-int vfs_rmdir(const char *path) {
-    char name[MAX_NAME];
+int rmdir(const char *path) {
+    char name[MAX_NAME_LEN];
     vfs_node_t *parent = vfs_resolve_parent(path, name);
     if (!parent) return -1;
 
     vfs_node_t *target = vfs_node_find_child(parent, name);
-    if (target && target->children) return -1;
+    if (target) {
+        if (target->type != VFS_NODE_DIR) { errno = ENOTDIR; return -1; }
+        if (target->children)             { errno = ENOTEMPTY; return -1; }
+    }
 
     if (parent->ops && parent->ops->rmdir) {
         int ret = parent->ops->rmdir(parent, name);
@@ -663,15 +869,14 @@ int vfs_rmdir(const char *path) {
         return ret;
     }
 
-    if (!target) return -1;
-    if (target->type != VFS_NODE_DIR) return -1;
+    if (!target) { errno = ENOENT; return -1; }
     vfs_node_unlink_child(parent, target);
     kfree(target);
     return 0;
 }
 
-int vfs_unlink(const char *path) {
-    char name[MAX_NAME];
+int unlink(const char *path) {
+    char name[MAX_NAME_LEN];
     vfs_node_t *parent = vfs_resolve_parent(path, name);
     if (!parent) return -1;
 
@@ -686,74 +891,206 @@ int vfs_unlink(const char *path) {
         return ret;
     }
 
-    if (!target) return -1;
-    if (target->ref_count > 0) return -1;
+    if (!target)               { errno = ENOENT; return -1; }
+    if (target->ref_count > 0) { errno = EACCES; return -1; }
     vfs_node_unlink_child(parent, target);
     kfree(target);
     return 0;
 }
 
-int vfs_readdir(const char *path, uint32_t index, vfs_dirent_t *out) {
-    if (!out) return -1;
+int rename(const char *old_path, const char *new_path) {
+    char old_name[MAX_NAME_LEN], new_name[MAX_NAME_LEN];
+    vfs_node_t *old_parent = vfs_resolve_parent(old_path, old_name);
+    vfs_node_t *new_parent = vfs_resolve_parent(new_path, new_name);
+    if (!old_parent || !new_parent) return -1;
+
+    if (old_parent->ops && old_parent->ops->rename)
+        return old_parent->ops->rename(old_parent, old_name, new_parent, new_name);
+
+    vfs_node_t *target = vfs_node_find_child(old_parent, old_name);
+    if (!target) { errno = ENOENT; return -1; }
+
+    vfs_node_t *existing = vfs_node_find_child(new_parent, new_name);
+    if (existing) {
+        vfs_node_unlink_child(new_parent, existing);
+        if (existing->ref_count == 0) kfree(existing);
+    }
+
+    vfs_node_unlink_child(old_parent, target);
+    size_t nlen = strlen(new_name);
+    if (nlen >= MAX_NAME_LEN) nlen = MAX_NAME_LEN - 1;
+    memcpy(target->name, new_name, nlen);
+    target->name[nlen] = '\0';
+    vfs_node_link_child(new_parent, target);
+    return 0;
+}
+
+int truncate(const char *path, off_t length) {
+    if (length < 0) { errno = EINVAL; return -1; }
     vfs_node_t *node = vfs_resolve_path(path);
     if (!node) return -1;
+    if (node->type != VFS_NODE_FILE) { errno = EINVAL; return -1; }
+    if (node->ops && node->ops->truncate) return node->ops->truncate(node, length);
+    node->size = (size_t)length;
+    return 0;
+}
+
+int ftruncate(int fd, off_t length) {
+    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open) { errno = EBADF; return -1; }
+    if (length < 0) { errno = EINVAL; return -1; }
+    vfs_node_t *node = fd_table[fd].node;
+    if (!node) { errno = EBADF; return -1; }
+    if (node->type != VFS_NODE_FILE) { errno = EINVAL; return -1; }
+    if (node->ops && node->ops->truncate) return node->ops->truncate(node, length);
+    node->size = (size_t)length;
+    return 0;
+}
+
+int symlink(const char *target, const char *linkpath) {
+    char name[MAX_NAME_LEN];
+    vfs_node_t *parent = vfs_resolve_parent(linkpath, name);
+    if (!parent) return -1;
+
+    if (parent->ops && parent->ops->symlink)
+        return parent->ops->symlink(parent, name, target);
+
+    vfs_node_t *node = vfs_node_alloc(name, VFS_NODE_SYMLINK);
+    if (!node) return -1;
+
+    size_t tlen = strlen(target);
+    char *stored = kmalloc(tlen + 1);
+    if (!stored) { kfree(node); errno = ENOSPC; return -1; }
+    memcpy(stored, target, tlen + 1);
+    node->priv = stored;
+    vfs_node_link_child(parent, node);
+    return 0;
+}
+
+ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
+    if (!buf || bufsiz == 0) { errno = EINVAL; return -1; }
+
+    char pbuf[PATH_MAX];
+    size_t len = strlen(path);
+    if (len >= PATH_MAX) { errno = EINVAL; return -1; }
+    memcpy(pbuf, path, len + 1);
+
+    char *last_slash = NULL;
+    for (char *p = pbuf; *p; p++)
+        if (*p == '/') last_slash = p;
+
+    const char *base = last_slash ? last_slash + 1 : pbuf;
+    if (last_slash) *last_slash = '\0';
+
+    vfs_node_t *parent = last_slash ? vfs_resolve_path(pbuf) : (vfs_cwd ? vfs_cwd : vfs_root);
+    if (!parent) return -1;
+
+    vfs_node_t *node = vfs_node_find_child(parent, base);
+    if (!node) { errno = ENOENT; return -1; }
+    if (node->type != VFS_NODE_SYMLINK) { errno = EINVAL; return -1; }
+
+    if (node->ops && node->ops->readlink)
+        return node->ops->readlink(node, buf, bufsiz);
+
+    const char *stored = (const char *)node->priv;
+    if (!stored) { errno = ENOENT; return -1; }
+    size_t slen = strlen(stored);
+    if (slen > bufsiz) slen = bufsiz;
+    memcpy(buf, stored, slen);
+    return (ssize_t)slen;
+}
+
+int access(const char *path, int mode) {
+    (void)mode;
+    vfs_node_t *node = vfs_resolve_path(path);
+    if (!node) { errno = ENOENT; return -1; }
+    return 0;
+}
+
+vfs_dir_t *opendir(const char *path) {
+    vfs_node_t *node = vfs_resolve_path(path);
+    if (!node) { errno = ENOENT; return NULL; }
 
     if (node->type == VFS_NODE_MOUNTPOINT) {
         vfs_node_t *inner = (vfs_node_t *)node->priv;
         if (inner) node = inner;
     }
 
-    if (node->ops && node->ops->readdir) {
-        return node->ops->readdir(node, index, out);
+    if (node->type != VFS_NODE_DIR) { errno = ENOTDIR; return NULL; }
+
+    vfs_dir_t *dir = kmalloc(sizeof(vfs_dir_t));
+    if (!dir) { errno = ENOSPC; return NULL; }
+    dir->node = node;
+    dir->pos  = 0;
+    node->ref_count++;
+    return dir;
+}
+
+vfs_dirent_t *readdir(vfs_dir_t *dir) {
+    if (!dir || !dir->node) { errno = EBADF; return NULL; }
+
+    static vfs_dirent_t ent;
+
+    if (dir->node->ops && dir->node->ops->readdir) {
+        if (dir->node->ops->readdir(dir->node, (uint32_t)dir->pos, &ent) != 0)
+            return NULL;
+        dir->pos++;
+        return &ent;
     }
 
     uint32_t i = 0;
-    for (vfs_node_t *c = node->children; c; c = c->next) {
-        if (i == index) {
+    for (vfs_node_t *c = dir->node->children; c; c = c->next) {
+        if (i == (uint32_t)dir->pos) {
             size_t nlen = strlen(c->name);
-            if (nlen >= MAX_NAME) nlen = MAX_NAME - 1;
-            memcpy(out->name, c->name, nlen);
-            out->name[nlen] = '\0';
-            out->type = c->type;
-            return 0;
+            if (nlen >= MAX_NAME_LEN) nlen = MAX_NAME_LEN - 1;
+            memcpy(ent.d_name, c->name, nlen);
+            ent.d_name[nlen] = '\0';
+            ent.d_type = c->type;
+            ent.d_ino  = c->ino;
+            dir->pos++;
+            return &ent;
         }
         i++;
     }
-    return -1;
+    return NULL;
 }
 
-int vfs_create(const char *path, uint32_t type) {
-    char name[MAX_NAME];
-    vfs_node_t *parent = vfs_resolve_parent(path, name);
-    if (!parent) return -1;
-
-    if (parent->type == VFS_NODE_MOUNTPOINT) {
-        vfs_node_t *inner = (vfs_node_t *)parent->priv;
-        if (inner) parent = inner;
-    }
-
-    if (parent->ops && parent->ops->create) {
-        return parent->ops->create(parent, name, type);
-    }
-
-    vfs_node_t *node = vfs_node_alloc(name, type);
-    if (!node) return -1;
-    vfs_node_link_child(parent, node);
+int closedir(vfs_dir_t *dir) {
+    if (!dir) { errno = EBADF; return -1; }
+    dir->node->ref_count--;
+    kfree(dir);
     return 0;
 }
 
-vfs_node_t *vfs_register_node(const char *path, uint32_t type, vfs_node_ops_t *ops, void *priv) {
-    char name[MAX_NAME];
-    vfs_node_t *parent = vfs_resolve_parent(path, name);
-    if (!parent) return NULL;
+void rewinddir(vfs_dir_t *dir) {
+    if (dir) dir->pos = 0;
+}
 
-    vfs_node_t *node = vfs_node_alloc(name, type);
-    if (!node) return NULL;
+long telldir(vfs_dir_t *dir) {
+    if (!dir) { errno = EBADF; return -1; }
+    return (long)dir->pos;
+}
 
-    node->ops  = ops;
-    node->priv = priv;
-    vfs_node_link_child(parent, node);
-    return node;
+void seekdir(vfs_dir_t *dir, long pos) {
+    if (dir) dir->pos = (off_t)pos;
+}
+
+int dup(int fd) {
+    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open) { errno = EBADF; return -1; }
+    int new_fd = fd_alloc();
+    if (new_fd < 0) return -1;
+    fd_table[new_fd] = fd_table[fd];
+    fd_table[new_fd].node->ref_count++;
+    return new_fd;
+}
+
+int dup2(int old_fd, int new_fd) {
+    if (old_fd < 0 || old_fd >= MAX_FD || !fd_table[old_fd].open) { errno = EBADF; return -1; }
+    if (new_fd < 0 || new_fd >= MAX_FD)                            { errno = EBADF; return -1; }
+    if (old_fd == new_fd) return new_fd;
+    if (fd_table[new_fd].open) close(new_fd);
+    fd_table[new_fd] = fd_table[old_fd];
+    fd_table[new_fd].node->ref_count++;
+    return new_fd;
 }
 
 static void vfs_setup_stdio(void) {
@@ -762,26 +1099,26 @@ static void vfs_setup_stdio(void) {
     vfs_node_t *stderr_node = vfs_resolve_path("/dev/stderr");
 
     if (stdin_node) {
-        fd_table[VFS_STDIN].node   = stdin_node;
-        fd_table[VFS_STDIN].offset = 0;
-        fd_table[VFS_STDIN].flags  = VFS_O_RDONLY;
-        fd_table[VFS_STDIN].open   = 1;
+        fd_table[STDIN_FILENO].node   = stdin_node;
+        fd_table[STDIN_FILENO].offset = 0;
+        fd_table[STDIN_FILENO].flags  = O_RDONLY;
+        fd_table[STDIN_FILENO].open   = 1;
         stdin_node->ref_count++;
     }
 
     if (stdout_node) {
-        fd_table[VFS_STDOUT].node   = stdout_node;
-        fd_table[VFS_STDOUT].offset = 0;
-        fd_table[VFS_STDOUT].flags  = VFS_O_WRONLY;
-        fd_table[VFS_STDOUT].open   = 1;
+        fd_table[STDOUT_FILENO].node   = stdout_node;
+        fd_table[STDOUT_FILENO].offset = 0;
+        fd_table[STDOUT_FILENO].flags  = O_WRONLY;
+        fd_table[STDOUT_FILENO].open   = 1;
         stdout_node->ref_count++;
     }
 
     if (stderr_node) {
-        fd_table[VFS_STDERR].node   = stderr_node;
-        fd_table[VFS_STDERR].offset = 0;
-        fd_table[VFS_STDERR].flags  = VFS_O_WRONLY;
-        fd_table[VFS_STDERR].open   = 1;
+        fd_table[STDERR_FILENO].node   = stderr_node;
+        fd_table[STDERR_FILENO].offset = 0;
+        fd_table[STDERR_FILENO].flags  = O_WRONLY;
+        fd_table[STDERR_FILENO].open   = 1;
         stderr_node->ref_count++;
     }
 }
@@ -792,8 +1129,9 @@ uint8_t vfs_init(void) {
     vfs_root = vfs_node_alloc("/", VFS_NODE_DIR);
     if (!vfs_root) return VFS_ERR_NO_SLOTS;
 
-    fd_table_init();
+    vfs_cwd = vfs_root;
 
+    fd_table_init();
     mount_count = 0;
     vfs_ready   = 1;
 
@@ -847,38 +1185,16 @@ vfs_node_t *vfs_get_root(void) {
     return vfs_root;
 }
 
-int vfs_dup(int fd) {
-    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open) return -1;
-    int new_fd = fd_alloc();
-    if (new_fd < 0) return -1;
-    fd_table[new_fd] = fd_table[fd];
-    fd_table[new_fd].node->ref_count++;
-    return new_fd;
-}
-
-int vfs_dup2(int old_fd, int new_fd) {
-    if (old_fd < 0 || old_fd >= MAX_FD || !fd_table[old_fd].open) return -1;
-    if (new_fd < 0 || new_fd >= MAX_FD) return -1;
-    if (fd_table[new_fd].open) vfs_close(new_fd);
-    fd_table[new_fd] = fd_table[old_fd];
-    fd_table[new_fd].node->ref_count++;
-    return new_fd;
-}
-
-int32_t vfs_filesize(int fd) {
-    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open)
-        return -1;
-
-    vfs_node_t *node = fd_table[fd].node;
-    if (!node)
-        return -1;
-
-    return (int32_t)node->size;
-}
-
-int32_t vfs_tell(int fd) {
-    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].open) return -1;
-    return (int32_t)fd_table[fd].offset;
+vfs_node_t *vfs_register_node(const char *path, uint32_t type, vfs_node_ops_t *ops, void *priv) {
+    char name[MAX_NAME_LEN];
+    vfs_node_t *parent = vfs_resolve_parent(path, name);
+    if (!parent) return NULL;
+    vfs_node_t *node = vfs_node_alloc(name, type);
+    if (!node) return NULL;
+    node->ops  = ops;
+    node->priv = priv;
+    vfs_node_link_child(parent, node);
+    return node;
 }
 
 vfs_node_t *vfs_node_alloc_pub(const char *name, uint32_t type) {

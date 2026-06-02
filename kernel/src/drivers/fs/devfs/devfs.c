@@ -28,14 +28,14 @@ static vfs_node_ops_t devfs_dir_ops = {
     .rmdir   = NULL,
 };
 
-static int32_t dev_node_read(vfs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buf) {
+static ssize_t dev_node_read(vfs_node_t *node, void *buf, size_t size, off_t offset) {
     devfs_dev_t *dev = (devfs_dev_t *)node->priv;
     if (!dev || !dev->read) return -1;
     (void)offset;
     return dev->read(dev, buf, size);
 }
 
-static int32_t dev_node_write(vfs_node_t *node, uint32_t offset, uint32_t size, const uint8_t *buf) {
+static ssize_t dev_node_write(vfs_node_t *node, const void *buf, size_t size, off_t offset) {
     devfs_dev_t *dev = (devfs_dev_t *)node->priv;
     if (!dev || !dev->write) return -1;
     (void)offset;
@@ -75,75 +75,76 @@ static int devfs_readdir(vfs_node_t *dir, uint32_t index, vfs_dirent_t *out) {
     if (index >= devfs_dev_count) return -1;
     size_t nlen = strlen(devfs_devs[index].name);
     if (nlen >= MAX_NAME) nlen = MAX_NAME - 1;
-    memcpy(out->name, devfs_devs[index].name, nlen);
-    out->name[nlen] = '\0';
-    out->type = VFS_NODE_DEV;
+    memcpy(out->d_name, devfs_devs[index].name, nlen);
+    out->d_name[nlen] = '\0';
+    out->d_type = VFS_NODE_DEV;
+    out->d_ino  = 0;
     return 0;
 }
 
-static int32_t null_read(devfs_dev_t *dev, void *buf, uint32_t count) {
+static ssize_t null_read(devfs_dev_t *dev, void *buf, size_t count) {
     (void)dev; (void)buf; (void)count;
     return 0;
 }
 
-static int32_t null_write(devfs_dev_t *dev, const void *buf, uint32_t count) {
+static ssize_t null_write(devfs_dev_t *dev, const void *buf, size_t count) {
     (void)dev; (void)buf;
-    return (int32_t)count;
+    return (ssize_t)count;
 }
 
-static int32_t zero_read(devfs_dev_t *dev, void *buf, uint32_t count) {
+static ssize_t zero_read(devfs_dev_t *dev, void *buf, size_t count) {
     (void)dev;
     memset(buf, 0, count);
-    return (int32_t)count;
+    return (ssize_t)count;
 }
 
-static int32_t zero_write(devfs_dev_t *dev, const void *buf, uint32_t count) {
+static ssize_t zero_write(devfs_dev_t *dev, const void *buf, size_t count) {
     (void)dev; (void)buf;
-    return (int32_t)count;
+    return (ssize_t)count;
 }
 
-static int32_t console_read(devfs_dev_t *dev, void *buf, uint32_t count) {
+static ssize_t console_read(devfs_dev_t *dev, void *buf, size_t count) {
     (void)dev; (void)buf; (void)count;
     return 0;
 }
 
-static int32_t console_write(devfs_dev_t *dev, const void *buf, uint32_t count) {
+static ssize_t console_write(devfs_dev_t *dev, const void *buf, size_t count) {
     (void)dev;
     return tty_write(tty_get_active(), (const uint8_t *)buf, count);
 }
 
-static int32_t stdin_read(devfs_dev_t *dev, void *buf, uint32_t count) {
+static ssize_t stdin_read(devfs_dev_t *dev, void *buf, size_t count) {
     (void)dev;
     return console_read(dev, buf, count);
 }
 
-static int32_t stdin_write(devfs_dev_t *dev, const void *buf, uint32_t count) {
+static ssize_t stdin_write(devfs_dev_t *dev, const void *buf, size_t count) {
     (void)dev; (void)buf; (void)count;
     return -1;
 }
 
-static int32_t stdout_read(devfs_dev_t *dev, void *buf, uint32_t count) {
+static ssize_t stdout_read(devfs_dev_t *dev, void *buf, size_t count) {
     (void)dev; (void)buf; (void)count;
     return -1;
 }
 
-static int32_t stdout_write(devfs_dev_t *dev, const void *buf, uint32_t count) {
+static ssize_t stdout_write(devfs_dev_t *dev, const void *buf, size_t count) {
     (void)dev;
     return console_write(dev, buf, count);
 }
 
-static int32_t stderr_read(devfs_dev_t *dev, void *buf, uint32_t count) {
+static ssize_t stderr_read(devfs_dev_t *dev, void *buf, size_t count) {
     (void)dev; (void)buf; (void)count;
     return -1;
 }
 
-static int32_t stderr_write(devfs_dev_t *dev, const void *buf, uint32_t count) {
+static ssize_t stderr_write(devfs_dev_t *dev, const void *buf, size_t count) {
     (void)dev;
     return console_write(dev, buf, count);
 }
 
-int devfs_register(const char *name, int32_t (*read)(devfs_dev_t *, void *, uint32_t),
-                   int32_t (*write)(devfs_dev_t *, const void *, uint32_t), void *priv) {
+int devfs_register(const char *name, ssize_t (*read)(devfs_dev_t *, void *, size_t),
+                   ssize_t (*write)(devfs_dev_t *, const void *, size_t), void *priv) {
     if (devfs_dev_count >= DEVFS_MAX_DEVS) return -1;
 
     devfs_dev_t *dev = &devfs_devs[devfs_dev_count];
@@ -174,9 +175,8 @@ int devfs_unregister(const char *name) {
                 vfs_node_unlink_child_pub(devfs_root, node);
                 kfree(node);
             }
-            for (uint8_t j = i; j < devfs_dev_count - 1; j++) {
+            for (uint8_t j = i; j < devfs_dev_count - 1; j++)
                 devfs_devs[j] = devfs_devs[j + 1];
-            }
             devfs_dev_count--;
             return 0;
         }
@@ -186,9 +186,8 @@ int devfs_unregister(const char *name) {
 
 devfs_dev_t *devfs_get(const char *name) {
     for (uint8_t i = 0; i < devfs_dev_count; i++) {
-        if (strcmp(devfs_devs[i].name, name) == 0) {
+        if (strcmp(devfs_devs[i].name, name) == 0)
             return &devfs_devs[i];
-        }
     }
     return NULL;
 }
@@ -205,12 +204,12 @@ void devfs_init(void) {
     devfs_dev_count = 0;
     devfs_ready     = 1;
 
-    devfs_register("null",   null_read,   null_write,   NULL);
-    devfs_register("zero",   zero_read,   zero_write,   NULL);
-    devfs_register("console",console_read,console_write,NULL);
-    devfs_register("stdin",  stdin_read,  stdin_write,  NULL);
-    devfs_register("stdout", stdout_read, stdout_write, NULL);
-    devfs_register("stderr", stderr_read, stderr_write, NULL);
+    devfs_register("null",    null_read,    null_write,    NULL);
+    devfs_register("zero",    zero_read,    zero_write,    NULL);
+    devfs_register("console", console_read, console_write, NULL);
+    devfs_register("stdin",   stdin_read,   stdin_write,   NULL);
+    devfs_register("stdout",  stdout_read,  stdout_write,  NULL);
+    devfs_register("stderr",  stderr_read,  stderr_write,  NULL);
 
     log_info("devfs: initialized with %d built-in devices\n", devfs_dev_count);
 }

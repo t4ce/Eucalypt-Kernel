@@ -299,11 +299,11 @@ static int64_t tar_append_entry(ramfs_vol_t *vol, const char *tar_path,
     return (int64_t)insert_at;
 }
 
-static int32_t     ramfs_vfs_read   (vfs_node_t *, uint32_t, uint32_t, uint8_t *);
-static int32_t     ramfs_vfs_write  (vfs_node_t *, uint32_t, uint32_t, const uint8_t *);
+static ssize_t     ramfs_vfs_read   (vfs_node_t *, void *, size_t, off_t);
+static ssize_t     ramfs_vfs_write  (vfs_node_t *, const void *, size_t, off_t);
 static int         ramfs_vfs_readdir(vfs_node_t *, uint32_t, vfs_dirent_t *);
 static vfs_node_t *ramfs_vfs_lookup (vfs_node_t *, const char *);
-static int         ramfs_vfs_create (vfs_node_t *, const char *, uint32_t);
+static int         ramfs_vfs_create (vfs_node_t *, const char *, uint32_t, uint32_t);
 static int         ramfs_vfs_unlink (vfs_node_t *, const char *);
 static int         ramfs_vfs_rmdir  (vfs_node_t *, const char *);
 
@@ -335,12 +335,11 @@ static vfs_node_t *ramfs_node_alloc(const char *vfs_name, uint32_t type,
 
     node->priv = priv;
     node->ops  = &ramfs_ops;
-    node->size = (uint32_t)size;
+    node->size = size;
     return node;
 }
 
-static int32_t ramfs_vfs_read(vfs_node_t *node, uint32_t offset,
-                               uint32_t size, uint8_t *buf) {
+static ssize_t ramfs_vfs_read(vfs_node_t *node, void *buf, size_t size, off_t offset) {
     ramfs_node_priv_t *priv = (ramfs_node_priv_t *)node->priv;
     if (!priv || priv->hdr_offset < 0) return -1;
 
@@ -349,15 +348,14 @@ static int32_t ramfs_vfs_read(vfs_node_t *node, uint32_t offset,
     uint64_t file_sz = tar_octal(hdr + TAR_SIZE_OFF, TAR_SIZE_LEN);
     uint8_t *data    = hdr + TAR_BLOCK;
 
-    if (offset >= (uint32_t)file_sz) return 0;
-    uint32_t avail = (uint32_t)(file_sz - offset);
+    if ((uint64_t)offset >= file_sz) return 0;
+    uint64_t avail = file_sz - (uint64_t)offset;
     if (size > avail) size = avail;
     memcpy(buf, data + offset, size);
-    return (int32_t)size;
+    return (ssize_t)size;
 }
 
-static int32_t ramfs_vfs_write(vfs_node_t *node, uint32_t offset,
-                                uint32_t size, const uint8_t *buf) {
+static ssize_t ramfs_vfs_write(vfs_node_t *node, const void *buf, size_t size, off_t offset) {
     ramfs_node_priv_t *priv = (ramfs_node_priv_t *)node->priv;
     if (!priv || priv->hdr_offset < 0) return -1;
 
@@ -365,14 +363,14 @@ static int32_t ramfs_vfs_write(vfs_node_t *node, uint32_t offset,
     uint8_t *hdr     = vol->buf + priv->hdr_offset;
     uint64_t old_sz  = tar_octal(hdr + TAR_SIZE_OFF, TAR_SIZE_LEN);
 
-    uint64_t new_sz = (offset + size > (uint32_t)old_sz)
-                      ? (uint64_t)(offset + size)
+    uint64_t new_sz = ((uint64_t)offset + size > old_sz)
+                      ? (uint64_t)offset + size
                       : old_sz;
 
-    uint8_t *tmp = kmalloc((uint32_t)new_sz);
+    uint8_t *tmp = kmalloc(new_sz);
     if (!tmp) return -1;
-    memset(tmp, 0, (uint32_t)new_sz);
-    if (old_sz > 0) memcpy(tmp, hdr + TAR_BLOCK, (uint32_t)old_sz);
+    memset(tmp, 0, new_sz);
+    if (old_sz > 0) memcpy(tmp, hdr + TAR_BLOCK, old_sz);
     if (buf && size > 0) memcpy(tmp + offset, buf, size);
 
     if (tar_delete_entry(vol, priv->hdr_offset) != 0) { kfree(tmp); return -1; }
@@ -383,12 +381,11 @@ static int32_t ramfs_vfs_write(vfs_node_t *node, uint32_t offset,
     if (new_hdr_off < 0) return -1;
 
     priv->hdr_offset = new_hdr_off;
-    node->size       = (uint32_t)new_sz;
-    return (int32_t)size;
+    node->size       = new_sz;
+    return (ssize_t)size;
 }
 
-static int ramfs_vfs_readdir(vfs_node_t *node, uint32_t index,
-                              vfs_dirent_t *out) {
+static int ramfs_vfs_readdir(vfs_node_t *node, uint32_t index, vfs_dirent_t *out) {
     ramfs_node_priv_t *dpriv = (ramfs_node_priv_t *)node->priv;
     if (!dpriv) return -1;
 
@@ -447,9 +444,10 @@ static int ramfs_vfs_readdir(vfs_node_t *node, uint32_t index,
                 }
                 int nlen = strlen(last);
                 if (nlen >= MAX_NAME) nlen = MAX_NAME - 1;
-                memcpy(out->name, last, nlen);
-                out->name[nlen] = '\0';
-                out->type = (type == TAR_TYPE_DIR) ? VFS_NODE_DIR : VFS_NODE_FILE;
+                memcpy(out->d_name, last, nlen);
+                out->d_name[nlen] = '\0';
+                out->d_type = (type == TAR_TYPE_DIR) ? VFS_NODE_DIR : VFS_NODE_FILE;
+                out->d_ino  = 0;
                 return 0;
             }
             found++;
@@ -533,7 +531,8 @@ static vfs_node_t *ramfs_vfs_lookup(vfs_node_t *dir, const char *name) {
     return NULL;
 }
 
-static int ramfs_vfs_create(vfs_node_t *dir, const char *name, uint32_t type) {
+static int ramfs_vfs_create(vfs_node_t *dir, const char *name, uint32_t type, uint32_t mode) {
+    (void)mode;
     ramfs_node_priv_t *dpriv = (ramfs_node_priv_t *)dir->priv;
     if (!dpriv) return -1;
 

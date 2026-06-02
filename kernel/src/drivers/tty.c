@@ -1,3 +1,4 @@
+#include "drivers/fs/vfs/vfs.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <mem.h>
@@ -100,24 +101,24 @@ void tty_switch(uint8_t index) {
     ttys[active_tty].active = 1;
 }
 
-static int32_t devfs_tty_read(devfs_dev_t *dev, void *buf, uint32_t count) {
+static ssize_t devfs_tty_read(devfs_dev_t *dev, void *buf, size_t count) {
     tty_t *tty = (tty_t *)dev->priv;
-    return tty_read(tty, (uint8_t *)buf, count);
+    return (ssize_t)tty_read(tty, (uint8_t *)buf, (uint32_t)count);
 }
 
-static int32_t devfs_tty_write(devfs_dev_t *dev, const void *buf, uint32_t count) {
+static ssize_t devfs_tty_write(devfs_dev_t *dev, const void *buf, size_t count) {
     tty_t *tty = (tty_t *)dev->priv;
-    return tty_write(tty, (const uint8_t *)buf, count);
+    return (ssize_t)tty_write(tty, (const uint8_t *)buf, (uint32_t)count);
 }
 
-static int32_t devfs_tty_alias_read(devfs_dev_t *dev, void *buf, uint32_t count) {
+static ssize_t devfs_tty_alias_read(devfs_dev_t *dev, void *buf, size_t count) {
     (void)dev;
-    return tty_read(tty_get_active(), (uint8_t *)buf, count);
+    return (ssize_t)tty_read(tty_get_active(), (uint8_t *)buf, (uint32_t)count);
 }
 
-static int32_t devfs_tty_alias_write(devfs_dev_t *dev, const void *buf, uint32_t count) {
+static ssize_t devfs_tty_alias_write(devfs_dev_t *dev, const void *buf, size_t count) {
     (void)dev;
-    return tty_write(tty_get_active(), (const uint8_t *)buf, count);
+    return (ssize_t)tty_write(tty_get_active(), (const uint8_t *)buf, (uint32_t)count);
 }
 
 void tty_init(void (*output_fn)(tty_t *tty, char c)) {
@@ -144,6 +145,8 @@ void tty_init(void (*output_fn)(tty_t *tty, char c)) {
         char name[8];
         name[0] = 't'; name[1] = 't'; name[2] = 'y';
         name[3] = '0' + i; name[4] = '\0';
+
+        
 
         devfs_register(name, devfs_tty_read, devfs_tty_write, t);
     }
