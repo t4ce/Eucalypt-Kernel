@@ -5,6 +5,8 @@
 #include <logging/printk.h>
 #include <panic.h>
 #include <multitasking/sched.h>
+#include <multitasking/proc.h>
+#include <ipc/signal.h>
 #include <idt/idt.h>
 
 #define APIC_TIMER_VECTOR 0x20
@@ -71,6 +73,15 @@ void idt_init(void) {
     outb(0xA1, 0xFF);
     __asm__ volatile ("lidt %0" :: "m"(idtr));
     __asm__ volatile ("sti");
+}
+
+void exit_syscall() {
+    struct pcb *proc = proc_get(get_current_pid());
+    if (!proc) {
+        return;
+    }
+
+    signal_deliver(proc);
 }
 
 __attribute__((noreturn))

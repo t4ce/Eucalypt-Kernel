@@ -1,6 +1,7 @@
 extern isr_handler
 extern apic_interrupt
 extern do_syscall
+extern exit_syscall
 global apic_handler
 global int128_handler
 
@@ -160,6 +161,7 @@ int128_handler:
     pop rbx
     pop rax
     add rsp, 16
+    call exit_syscall
     iretq
 
 isr_stub     0

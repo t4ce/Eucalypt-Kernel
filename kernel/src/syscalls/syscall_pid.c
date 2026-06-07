@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <ipc/signal.h>
 #include <multitasking/proc.h>
 #include <multitasking/sched.h>
 #include <multitasking/thread.h>
@@ -26,4 +27,8 @@ uint64_t sys_exit(uint64_t code, uint64_t b, uint64_t c) {
 
 uint64_t sys_waitpid(uint64_t pid, uint64_t status, uint64_t flags) {
     return (uint64_t)proc_waitpid((int32_t)pid, (int *)status, (int)flags);
+}
+
+uint64_t sys_kill(uint64_t pid, uint64_t sig, uint64_t c) {
+
 }

@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-typedef struct __attribute__((packed)) {
+typedef struct [[gnu::packed]] {
     uint32_t reserved0;        // 0x00
     uint64_t rsp0;             // 0x04 - 0x08
     uint64_t rsp1;             // 0x0C - 0x10

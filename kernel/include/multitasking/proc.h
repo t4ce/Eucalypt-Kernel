@@ -6,6 +6,7 @@
 #include <multitasking/thread.h>
 
 #define MAX_FDS     64
+#define NSIG        16
 
 typedef enum {
     PROC_RUNNING,
@@ -23,6 +24,8 @@ struct pcb {
     int          exit_code;
     struct tcb  *threads[MAX_THREADS];
     void        *fd_table[MAX_FDS];
+    uint16_t    signal_pending;
+    void        (*signal_handler[NSIG])(int);
     uintptr_t    heap_start;
     uintptr_t    heap_end;
 };
@@ -33,5 +36,6 @@ int         proc_exec(const char *path, char **argv, char **envp);
 void        proc_exit(int code);
 int32_t     proc_waitpid(int32_t pid, int *status, int flags);
 struct pcb *add_thread(struct pcb *proc, void *entry);
+int proc_signal(int32_t pid, int sig);
 void        proc_destroy(struct pcb *proc);
 struct pcb *proc_get(int32_t pid);

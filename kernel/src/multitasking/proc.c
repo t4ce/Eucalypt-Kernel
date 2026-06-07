@@ -11,6 +11,7 @@
 #include <drivers/fs/vfs/vfs.h>
 #include <auxv.h>
 #include <logging/printk.h>
+#include <ipc/signal.h>
 #include <multitasking/proc.h>
 
 #define MAX_PROCS 256
@@ -46,6 +47,12 @@ struct pcb *proc_create(void *entry, bool user) {
     proc->user       = user;
     proc->state      = PROC_RUNNING;
 
+    for (int i = 0; i < NSIG; i++) {
+        proc->signal_handler[i] = default_sig_handler;
+    }
+
+    proc->signal_pending = 0;
+
     proc->threads[0] = user
         ? create_user_thread((uint64_t)entry, proc->cr3)
         : create_thread(entry, proc->cr3);
@@ -74,6 +81,10 @@ struct pcb *proc_fork() {
     child->heap_start = parent->heap_start;
     child->heap_end   = parent->heap_end;
     child->cr3        = paging_fork_pml4(parent->cr3);
+    memcpy(child->signal_handler, 
+           parent->signal_handler,
+           sizeof(parent->signal_handler
+    ));
 
     for (int i = 0; i < MAX_FDS; i++)
         child->fd_table[i] = parent->fd_table[i];
@@ -110,6 +121,9 @@ int proc_exec(const char *path, char **argv, char **envp) {
 
     proc->threads[0] = create_user_thread_with_stack(entry, proc->cr3,
                                                       argv, envp, &info);
+    for (int i = 0; i < NSIG; i++) {
+        proc->signal_handler[i] = default_sig_handler;
+    }
     if (!proc->threads[0]) return -1;
 
     enqueue(proc->threads[0]);
@@ -161,6 +175,36 @@ int32_t proc_waitpid(int32_t pid, int *status, int flags) {
         }
         sched_sleep(parent->threads[0]);
     }
+}
+
+int proc_signal(int32_t pid, int sig) {
+    if (sig >= NSIG) { 
+        return -1;
+    }
+
+    struct pcb *proc = proc_get((int32_t)pid);
+    if (!proc || proc->state == PROC_ZOMBIE) { 
+        return -1;
+    }
+        
+    if (sig == SIGKILL) {
+        proc->state = PROC_ZOMBIE;
+        proc->exit_code = 128 + SIGKILL;
+        for (int i = 0; i < MAX_THREADS; i++) {
+            if (proc->threads[i])
+                sched_wake(proc->threads[i]);
+        }
+        return 0;
+    }
+
+    proc->signal_pending |= (1 << sig);
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (proc->threads[i])
+            sched_wake(proc->threads[i]);
+    }
+
+    return 0;
 }
 
 struct pcb *add_thread(struct pcb *proc, void *entry) {
