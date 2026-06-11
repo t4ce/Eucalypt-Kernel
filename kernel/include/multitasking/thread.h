@@ -37,6 +37,4 @@ struct tcb *create_user_thread_with_stack(uint64_t entry, paddr cr3,
 struct tcb *thread_fork(struct tcb *parent, paddr cr3);
 void        thread_destroy(struct tcb *thread);
 void        handle_ret(int64_t code);
-struct tcb *get_thread_copy(uint16_t tid);
-struct tcb **get_thread(uint16_t tid);
 uint64_t    setup_stack(uint8_t *stack_base, uint64_t stack_size, void *entry);

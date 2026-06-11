@@ -8,8 +8,8 @@
 
 #define PML4_VIRT(cr3) ((uint64_t *)((cr3) + offset))
 
-uint64_t sys_mmap(uint64_t hint, uint64_t size, uint64_t flags) {
-    (void)hint; (void)flags;  // hint and flags ignored for now
+uint64_t sys_mmap(uint64_t hint, uint64_t size, uint64_t flags, uint64_t d, uint64_t e, uint64_t f) {
+    (void)hint; (void)flags; (void)d; (void)e; (void)f;
 
     struct pcb *proc = proc_get(get_current_pid());
     if (!proc) return (uint64_t)-1;
@@ -31,8 +31,9 @@ uint64_t sys_mmap(uint64_t hint, uint64_t size, uint64_t flags) {
     return vaddr;
 }
 
-uint64_t sys_munmap(uint64_t addr, uint64_t size, uint64_t unused) {
-    (void)unused;
+uint64_t sys_munmap(uint64_t addr, uint64_t size, uint64_t unused, uint64_t d, uint64_t e, uint64_t f) {
+    (void)unused; (void)d; (void)e; (void)f;
+
     struct pcb *proc = proc_get(get_current_pid());
     if (!proc) return (uint64_t)-1;
 

@@ -23,6 +23,7 @@
 #include <drivers/fs/vfs/vfs.h>
 #include <drivers/fs/devfs/devfs.h>
 #include <drivers/tty.h>
+#include <drivers/input.h>
 
 extern void enable_sse();
 
@@ -105,6 +106,10 @@ void kmain(void) {
     vfs_init();
     log_info("VFS initialized\n");
     tty_init(putchar);
+    input_init();
+    ps2_keyboard_init();
+    ps2_mouse_init();
+    log_info("Input system initialized\n");
     ramfs_init();
 
     if (!ramfs_addr || ramfs_size == 0) {

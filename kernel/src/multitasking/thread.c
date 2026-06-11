@@ -117,8 +117,7 @@ struct tcb *create_user_thread(uint64_t entry, paddr cr3) {
 
 struct tcb *create_user_thread_with_stack(uint64_t entry, paddr cr3,
                                            char **argv, char **envp,
-                                           const elf_load_info_t *info)
-{
+                                           const elf_load_info_t *info) {
     uint64_t *pml4      = (uint64_t *)(offset + cr3);
     uint64_t ustack_top = alloc_user_stack(pml4);
     uint64_t user_rsp   = ustack_top;
@@ -195,24 +194,6 @@ struct tcb *create_thread(void *entry, paddr cr3) {
 
     enqueue(tcb);
     return tcb;
-}
-
-struct tcb *get_thread_copy(uint16_t tid) {
-    for (int i = 0; i < tq->count; i++) {
-        int idx = (tq->front + i) % MAX_THREADS;
-        if (tq->threads[idx]->tid == tid)
-            return tq->threads[idx];
-    }
-    return NULL;
-}
-
-struct tcb **get_thread(uint16_t tid) {
-    for (int i = 0; i < tq->count; i++) {
-        int idx = (tq->front + i) % MAX_THREADS;
-        if (tq->threads[idx]->tid == tid)
-            return &tq->threads[idx];
-    }
-    return NULL;
 }
 
 struct tcb *thread_fork(struct tcb *parent, paddr cr3) {

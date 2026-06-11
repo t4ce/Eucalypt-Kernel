@@ -43,13 +43,14 @@ struct pcb *proc_create(void *entry, bool user) {
     memset(proc, 0, sizeof(struct pcb));
     proc->pid        = next_pid++;
     proc->parent_pid = -1;
+    proc->pgid       = proc->pid;
+    proc->sid        = proc->pid;
     proc->cr3        = paging_create_pml4();
     proc->user       = user;
     proc->state      = PROC_RUNNING;
 
-    for (int i = 0; i < NSIG; i++) {
+    for (int i = 0; i < NSIG; i++)
         proc->signal_handler[i] = default_sig_handler;
-    }
 
     proc->signal_pending = 0;
 
@@ -66,7 +67,7 @@ struct pcb *proc_create(void *entry, bool user) {
     return proc;
 }
 
-struct pcb *proc_fork() {
+struct pcb *proc_fork(void) {
     struct pcb *parent = proc_get(get_current_pid());
     if (!parent) return NULL;
 
@@ -76,15 +77,17 @@ struct pcb *proc_fork() {
     memset(child, 0, sizeof(struct pcb));
     child->pid        = next_pid++;
     child->parent_pid = parent->pid;
+    child->pgid       = parent->pgid;
+    child->sid        = parent->sid;
     child->user       = parent->user;
     child->state      = PROC_RUNNING;
     child->heap_start = parent->heap_start;
     child->heap_end   = parent->heap_end;
     child->cr3        = paging_fork_pml4(parent->cr3);
-    memcpy(child->signal_handler, 
+
+    memcpy(child->signal_handler,
            parent->signal_handler,
-           sizeof(parent->signal_handler
-    ));
+           sizeof(parent->signal_handler));
 
     for (int i = 0; i < MAX_FDS; i++)
         child->fd_table[i] = parent->fd_table[i];
@@ -121,9 +124,9 @@ int proc_exec(const char *path, char **argv, char **envp) {
 
     proc->threads[0] = create_user_thread_with_stack(entry, proc->cr3,
                                                       argv, envp, &info);
-    for (int i = 0; i < NSIG; i++) {
+    for (int i = 0; i < NSIG; i++)
         proc->signal_handler[i] = default_sig_handler;
-    }
+
     if (!proc->threads[0]) return -1;
 
     enqueue(proc->threads[0]);
@@ -152,6 +155,10 @@ void proc_exit(int code) {
     sched_yield();
 }
 
+void proc_exit_group(int code) {
+    proc_exit(code);
+}
+
 int32_t proc_waitpid(int32_t pid, int *status, int flags) {
     (void)flags;
 
@@ -178,17 +185,15 @@ int32_t proc_waitpid(int32_t pid, int *status, int flags) {
 }
 
 int proc_signal(int32_t pid, int sig) {
-    if (sig >= NSIG) { 
+    if (sig < 0 || sig >= NSIG)
         return -1;
-    }
 
-    struct pcb *proc = proc_get((int32_t)pid);
-    if (!proc || proc->state == PROC_ZOMBIE) { 
+    struct pcb *proc = proc_get(pid);
+    if (!proc || proc->state == PROC_ZOMBIE)
         return -1;
-    }
-        
+
     if (sig == SIGKILL) {
-        proc->state = PROC_ZOMBIE;
+        proc->state     = PROC_ZOMBIE;
         proc->exit_code = 128 + SIGKILL;
         for (int i = 0; i < MAX_THREADS; i++) {
             if (proc->threads[i])
@@ -197,7 +202,16 @@ int proc_signal(int32_t pid, int sig) {
         return 0;
     }
 
-    proc->signal_pending |= (1 << sig);
+    if (sig == SIGSTOP) {
+        proc->state = PROC_STOPPED;
+        for (int i = 0; i < MAX_THREADS; i++) {
+            if (proc->threads[i])
+                sched_sleep(proc->threads[i]);
+        }
+        return 0;
+    }
+
+    proc->signal_pending |= (1U << sig);
 
     for (int i = 0; i < MAX_THREADS; i++) {
         if (proc->threads[i])

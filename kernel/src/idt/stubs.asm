@@ -1,8 +1,12 @@
 extern isr_handler
 extern apic_interrupt
+extern ps2_keyboard_interrupt
+extern ps2_mouse_interrupt
 extern do_syscall
 extern exit_syscall
 global apic_handler
+global ps2_keyboard_handler
+global ps2_mouse_handler
 global int128_handler
 
 struc iframe
@@ -141,6 +145,8 @@ int128_handler:
     mov rsi, [rsp + iframe.rdi]
     mov rdx, [rsp + iframe.rsi]
     mov rcx, [rsp + iframe.rdx]
+    mov r8,  [rsp + iframe.r8]
+    mov r9,  [rsp + iframe.r9]
 
     call do_syscall
 
@@ -162,6 +168,74 @@ int128_handler:
     pop rax
     add rsp, 16
     call exit_syscall
+    iretq
+
+ps2_keyboard_handler:
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    call ps2_keyboard_interrupt
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    iretq
+
+ps2_mouse_handler:
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    call ps2_mouse_interrupt
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
     iretq
 
 isr_stub     0

@@ -52,7 +52,9 @@ static int fd_alloc(void) {
 
 vfs_node_t *vfs_node_alloc(const char *name, uint32_t type) {
     vfs_node_t *node = kmalloc(sizeof(vfs_node_t));
-    if (!node) { errno = ENOSPC; return NULL; }
+    if (!node) { 
+        errno = ENOSPC; return NULL; 
+    }
     memset(node, 0, sizeof(vfs_node_t));
     size_t len = strlen(name);
     if (len >= MAX_NAME_LEN) len = MAX_NAME_LEN - 1;

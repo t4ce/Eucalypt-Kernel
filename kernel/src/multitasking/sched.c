@@ -1,3 +1,5 @@
+#include <stddef.h>
+#include <stdbool.h>
 #include <logging/printk.h>
 #include <gdt/gdt.h>
 #include <mm/heap.h>
@@ -7,9 +9,16 @@
 
 extern void context_switch(struct tcb *current, struct tcb *next);
 
+typedef struct {
+    struct tcb *threads[MAX_THREADS];
+    int         front;
+    int         rear;
+    int         count;
+} threads_t;
+
 static threads_t ready_queue_data;
 struct tcb *current_thread = NULL;
-threads_t *tq = &ready_queue_data;
+threads_t  *tq = &ready_queue_data;
 static bool enabled = false;
 
 void enable_sched(void) {
@@ -43,7 +52,7 @@ struct tcb *dequeue(void) {
     return thread;
 }
 
-void sched_yield() {
+void sched_yield(void) {
     __asm__ volatile("int $0x20");
 }
 
@@ -101,6 +110,31 @@ int32_t get_current_pid(void) {
     return current_thread->parent->pid;
 }
 
+int32_t get_current_ppid(void) {
+    if (!current_thread || !current_thread->parent) return -1;
+    struct pcb *proc = proc_get(current_thread->parent->pid);
+    if (!proc) return -1;
+    return proc->parent_pid;
+}
+
 struct tcb *get_current_thread(void) {
     return current_thread;
+}
+
+struct tcb *get_thread_copy(uint16_t tid) {
+    for (int i = 0; i < tq->count; i++) {
+        int idx = (tq->front + i) % MAX_THREADS;
+        if (tq->threads[idx]->tid == tid)
+            return tq->threads[idx];
+    }
+    return NULL;
+}
+
+struct tcb **get_thread(uint16_t tid) {
+    for (int i = 0; i < tq->count; i++) {
+        int idx = (tq->front + i) % MAX_THREADS;
+        if (tq->threads[idx]->tid == tid)
+            return &tq->threads[idx];
+    }
+    return NULL;
 }
