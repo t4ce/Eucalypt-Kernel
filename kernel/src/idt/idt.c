@@ -77,13 +77,28 @@ void idt_init(void) {
     __asm__ volatile ("sti");
 }
 
-void exit_syscall() {
+void exit_syscall(interrupt_frame_t *f) {
     struct pcb *proc = proc_get(get_current_pid());
     if (!proc) {
         return;
     }
 
-    signal_deliver(proc);
+    if (!proc->signal_pending) {
+        return;
+    }
+
+    for (int i = 0; i < NSIG; i++) {
+        if (!(proc->signal_pending & (1U << i))) {
+            continue;
+        }
+        proc->signal_pending &= ~(1U << i);
+        if (i == SIGKILL || i == SIGSTOP) {
+            default_sig_handler(i);
+        } else {
+            f->rip = (uint64_t)proc->signal_handler[i];
+            f->rdi = i;
+        }
+    }
 }
 
 static void exception_handler(interrupt_frame_t *f) {

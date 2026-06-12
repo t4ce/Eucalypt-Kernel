@@ -37,5 +37,4 @@ typedef enum {
     SIG_ACTION_CONTINUE,
 } sig_default_action_t;
 
-void signal_deliver(struct pcb *proc);
 void default_sig_handler(int sig);

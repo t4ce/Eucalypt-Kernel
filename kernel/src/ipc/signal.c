@@ -28,22 +28,7 @@ static const sig_default_action_t default_actions[NSIG] = {
     [SIGTTOU] = SIG_ACTION_STOP,
 };
 
-void signal_deliver(struct pcb *proc) {
-    if (!proc->signal_pending) {
-        return;
-    }
-    for (int i = 0; i < NSIG; i++) {
-        if (!(proc->signal_pending & (1U << i))) {
-            continue;
-        }
-        proc->signal_pending &= ~(1U << i);
-        if (i == SIGKILL || i == SIGSTOP) {
-            default_sig_handler(i);
-        } else {
-            proc->signal_handler[i](i);
-        }
-    }
-}
+
 
 void default_sig_handler(int sig) {
     switch (default_actions[sig]) {

@@ -151,6 +151,8 @@ int128_handler:
     call do_syscall
 
     mov [rsp + iframe.rax], rax
+    mov rdi, rsp
+    call exit_syscall
     pop r15
     pop r14
     pop r13
@@ -167,7 +169,6 @@ int128_handler:
     pop rbx
     pop rax
     add rsp, 16
-    call exit_syscall
     iretq
 
 ps2_keyboard_handler:
