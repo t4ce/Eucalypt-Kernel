@@ -1,7 +1,5 @@
 # Eucalypt-Kernel
 
-A modern x86-64 kernel written in C and assembly with support for multitasking, virtual memory, and signal handling.
-
 ## Features
 
 - x86-64 architecture support
