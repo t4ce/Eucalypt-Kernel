@@ -100,6 +100,10 @@ void kmain(void) {
     log_info("Heap initialized\n");
     enable_apic(true);
     log_info("APIC enabled\n");
+    ioapic_init();
+    log_info("IOAPIC initalized\n");
+    apic_timer_init(1000);
+    log_info("APIC timer initialized\n");
     ahci_init();
     log_info("AHCI initialized\n");
     enable_sse();
@@ -124,42 +128,48 @@ void kmain(void) {
         log_info("Ramfs mounted\n");
     }
 
+    char *filenames[10];
+    ramfs_list(ramfs_addr, "/build/", filenames, 10);
+    for (int i = 0; i < 10; i++) {
+        if (filenames[i]) {
+            log_info("File: %s\n", filenames[i]);
+        }
+    }
+
     scheduler_init();
 
     paddr idle_cr3 = paging_create_pml4();
     create_thread(idle_thread, idle_cr3);
     log_info("Idle thread created\n");
 
-    // int fd = vfs_open("/ram/USER", VFS_O_RDONLY);
-    // if (fd < 0) {
-    //     log_error("Failed to open /ram/USER: %d\n", fd);
-    //     hcf();
-    // }
-
-    // paddr user_cr3 = paging_create_pml4();
-
-    // elf_load_info_t info = {0};
-    // uint64_t entry = elf64_parse(fd, user_cr3, &info);
-    // vfs_close(fd);
-
-    // if (!entry) {
-    //     log_error("Failed to load ELF64 binary\n");
-    //     hcf();
-    // }
-
-    // info.execfn = "/ram/USER";
-    // 
-    // log_info("Creating user thread: entry=%llx cr3=%llx\n", entry, user_cr3);
-    // 
-    // char *argv[] = { "/ram/USER", NULL };
-    // char *envp[] = { "PATH=/", NULL };
-    // 
-    // create_user_thread_with_stack(entry, user_cr3, argv, envp, &info);
+    int fd = vfs_open("/ram/build/USER", VFS_O_RDONLY);
+    if (fd < 0) {
+        log_error("Failed to open /ram/build/USER: %d\n", fd);
+        hcf();
+    }
+ 
+    paddr user_cr3 = paging_create_pml4();
+ 
+    elf_load_info_t info = {0};
+    uint64_t entry = elf64_parse(fd, user_cr3, &info);
+    vfs_close(fd);
+ 
+    if (!entry) {
+        log_error("Failed to load ELF64 binary\n");
+        hcf();
+    }
+ 
+    info.execfn = "/ram/build/USER";
+    
+    log_info("Creating user thread: entry=%llx cr3=%llx\n", entry, user_cr3);
+    
+    char *argv[] = { "/ram/build/USER", NULL };
+    char *envp[] = { "PATH=/", NULL };
+    
+    create_user_thread_with_stack(entry, user_cr3, argv, envp, &info);
 
     enable_sched();
     log_info("Scheduler enabled");
-    apic_timer_init(1000);
-    log_info("APIC timer initialized");
     __asm__ volatile("sti");
 
     for (;;) {

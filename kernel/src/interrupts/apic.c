@@ -11,8 +11,9 @@
 #define APIC_BASE_MASK   0xFFFFFFFFFFFFF000ULL
 #define APIC_HEAP_BASE   0xFFFFFFFFC0000000ULL
 #define APIC_HEAP_SIZE   0x10000
-#define APIC_VIRT_BASE 0xFFFFFFFF80200000ULL
+#define APIC_VIRT_BASE   0xFFFFFFFF80200000ULL
 #define IOAPIC_VIRT_BASE 0xFFFFFFFF80201000ULL
+#define IOAPIC_PHYS_BASE 0xFEC00000ULL
 
 #define IOAPIC_REG_SELECT 0x00
 #define IOAPIC_REG_WINDOW 0x10
@@ -148,9 +149,8 @@ void ioapic_unmask(uint8_t irq) {
     ioapic_write(reg, low & ~(uint32_t)APIC_LVT_MASKED);
 }
 
-void ioapic_init(uint64_t phys_base) {
-    ASSERT_NOT_NULL(apic_virt);
-    paging_map_page(kernel_pml4, IOAPIC_VIRT_BASE, phys_base, 0x1000,
+void ioapic_init() {
+    paging_map_page(kernel_pml4, IOAPIC_VIRT_BASE, IOAPIC_PHYS_BASE, 0x1000,
                     ENTRY_FLAG_PRESENT | ENTRY_FLAG_RW | ENTRY_FLAG_NX);
     ioapic_virt = (volatile uint32_t *)IOAPIC_VIRT_BASE;
 
@@ -166,7 +166,6 @@ void enable_apic(bool is_bsp) {
     if ((msr & APIC_BASE_ENABLE) == 0)
         cpu_set_apic_base(phys, is_bsp);
 
-    // map directly into kernel page tables, not a separate vm_space
     paging_map_page(kernel_pml4, APIC_VIRT_BASE, phys, 0x1000,
                     ENTRY_FLAG_PRESENT | ENTRY_FLAG_RW | ENTRY_FLAG_NX);
     apic_virt = (volatile uint32_t *)APIC_VIRT_BASE;

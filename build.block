@@ -7,7 +7,7 @@ HOST_CFLAGS = "-g -O2 -pipe"
 HOST_CPPFLAGS = ""
 HOST_LDFLAGS = ""
 HOST_LIBS = ""
-//ARCHIVE = main_archive.tar
+ARCHIVE = main_archive.tar
 
 target kernel {
     "test -f kernel/.deps-obtained || ./kernel/get-deps"
@@ -45,10 +45,10 @@ target iso {
     run kernel
     run disks
     "rm -rf iso_root"
-    "mkdir -p iso_root/boot iso_root/boot/limine iso_root/EFI/BOOT" // iso_root/archive"
+    "mkdir -p iso_root/boot iso_root/boot/limine iso_root/EFI/BOOT iso_root/archive"
     "cp -v kernel/bin-$(ARCH)/kernel iso_root/boot/"
     "cp -v limine.conf iso_root/boot/limine/"
-    //"cp -v $(ARCHIVE) iso_root/archive/main_archive.tar"
+    "cp -v $(ARCHIVE) iso_root/archive/main_archive.tar"
     "if [ $(ARCH) = x86_64 ]; then cp -v limine-binary/limine-bios.sys limine-binary/limine-bios-cd.bin limine-binary/limine-uefi-cd.bin iso_root/boot/limine/ && cp -v limine-binary/BOOTX64.EFI limine-binary/BOOTIA32.EFI iso_root/EFI/BOOT/ && xorriso -as mkisofs -R -r -J -b boot/limine/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus -apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin -efi-boot-part --efi-boot-image --protective-msdos-label iso_root -o $(IMAGE_NAME).iso && ./limine-binary/limine bios-install $(IMAGE_NAME).iso; fi"
     "if [ $(ARCH) = aarch64 ]; then cp -v limine-binary/limine-uefi-cd.bin iso_root/boot/limine/ && cp -v limine-binary/BOOTAA64.EFI iso_root/EFI/BOOT/ && xorriso -as mkisofs -R -r -J -hfsplus -apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin -efi-boot-part --efi-boot-image --protective-msdos-label iso_root -o $(IMAGE_NAME).iso; fi"
     "if [ $(ARCH) = riscv64 ]; then cp -v limine-binary/limine-uefi-cd.bin iso_root/boot/limine/ && cp -v limine-binary/BOOTRISCV64.EFI iso_root/EFI/BOOT/ && xorriso -as mkisofs -R -r -J -hfsplus -apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin -efi-boot-part --efi-boot-image --protective-msdos-label iso_root -o $(IMAGE_NAME).iso; fi"
@@ -113,14 +113,13 @@ target run-hdd {
 
 target clean {
     "$(MAKE) -C kernel clean"
-    // "$(MAKE) -C archive clean"
-    "rm -rf iso_root $(IMAGE_NAME).iso $(IMAGE_NAME).hdd" //main_archive.tar"
+    "rm -rf iso_root $(IMAGE_NAME).iso $(IMAGE_NAME).hdd"
 }
 
 target distclean {
     "$(MAKE) -C kernel distclean"
     "$(MAKE) -C archive clean"
-    "rm -rf iso_root *.iso *.hdd limine-binary edk2-ovmf" //main_archive.tar"
+    "rm -rf iso_root *.iso *.hdd limine-binary edk2-ovmf"
 }
 
 run all
