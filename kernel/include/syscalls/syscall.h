@@ -37,7 +37,9 @@
 #define INPUT_SUBSCRIBE    33
 #define INPUT_UNSUBSCRIBE  34
 #define INPUT_READ         35
-#define NR_SYSCALLS        36
+#define THREAD_CREATE      36
+#define THREAD_REMOVE      37
+#define NR_SYSCALLS        38
 
 typedef uint64_t (*syscall_fn_t)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 

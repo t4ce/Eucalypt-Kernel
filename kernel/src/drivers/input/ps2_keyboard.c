@@ -5,13 +5,12 @@
 #include <idt/idt.h>
 #include <stdint.h>
 
+#define PS2_KEYBOARD_IRQ     1
+
 #define PS2_DATA_PORT        0x60
 #define PS2_CONTROL_PORT     0x64
 #define PS2_BUFFER_FULL      0x01
 #define PS2_BUFFER_EMPTY     0x02
-
-#define PS2_KEYBOARD_IRQ     1
-#define PS2_KEYBOARD_VECTOR  0x21
 
 // PS2 scancode to keycode mapping (simplified - US layout)
 static const uint8_t scancode_to_keycode[] = {
@@ -81,8 +80,6 @@ static bool ctrl_pressed = false;
 static bool alt_pressed = false;
 static bool extended = false;
 
-extern void ps2_keyboard_handler(void);
-
 static void ps2_wait_write(void) {
     for (int i = 0; i < 100000; i++) {
         if (!(inb(PS2_CONTROL_PORT) & 0x02)) return;
@@ -114,7 +111,7 @@ void ps2_keyboard_interrupt(void) {
     uint8_t scancode = inb(PS2_DATA_PORT);
     
     input_event_t event = {0};
-    event.timestamp = 0; // TODO: get actual timestamp
+    event.timestamp = 0;
     
     // Handle extended scancodes
     if (scancode == 0xE0) {
@@ -187,9 +184,7 @@ void ps2_keyboard_init(void) {
     // Enable scanning
     ps2_write_data(0xF4);
     ps2_read_data(); // ACK
-    
-    // Register interrupt handler
-    idt_set_descriptor(PS2_KEYBOARD_VECTOR, ps2_keyboard_handler, 0x8E);
+
     ioapic_unmask(PS2_KEYBOARD_IRQ);
     
     log_info("PS2 keyboard initialized\n");

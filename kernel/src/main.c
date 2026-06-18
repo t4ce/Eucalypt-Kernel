@@ -24,6 +24,7 @@
 #include <drivers/fs/devfs/devfs.h>
 #include <drivers/tty.h>
 #include <drivers/input.h>
+#include <drivers/fs/gpt.h>
 
 extern void enable_sse();
 
@@ -115,6 +116,9 @@ void kmain(void) {
     ps2_mouse_init();
     log_info("Input system initialized\n");
     ramfs_init();
+    log_info("RAMFS initialized\n");
+    gpt_init();
+    log_info("GPT initialized\n");
 
     if (!ramfs_addr || ramfs_size == 0) {
         log_error("No ramfs module loaded\n");

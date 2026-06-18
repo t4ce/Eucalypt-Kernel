@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <portio.h>
-#include <drivers/block/ide.h>
 #include <mem.h>
+#include <drivers/block/ide.h>
 
 #define ATA_CMD_READ_PIO          0x20
 #define ATA_CMD_READ_PIO_EXT      0x24
@@ -68,6 +68,7 @@
 #define IDE_ATAPI   0x01
 
 uint8_t ide_buf[2048] = {0};
+uint8_t ide_count = 0;
 volatile unsigned static char ide_irq = 0;
 
 static ide_state_t ide_state = {0};
@@ -159,21 +160,16 @@ uint8_t ide_polling(uint8_t channel, uint32_t advanced_check) {
 
    if (advanced_check) {
       uint8_t state = ide_read_reg(channel, ATA_REG_STATUS);
-
       if (state & ATA_SR_ERR) {
          return 2;
       }
-
       if (state & ATA_SR_DF) {
          return 1;
       }
-
       if ((state & ATA_SR_DRQ) == 0) {
          return 3;
       }
-
    }
-
    return 0;
 
 }
@@ -204,6 +200,8 @@ uint8_t ide_init(uint32_t bar0, uint32_t bar1, uint32_t bar2, uint32_t bar3,
                 continue;
             }
 
+            ide_count++;
+
             ide_read_buffer(i, ATA_REG_DATA, (void*)ide_buf, 128);
 
             ide_devicesp[c].type = type;
@@ -225,6 +223,7 @@ uint8_t ide_init(uint32_t bar0, uint32_t bar1, uint32_t bar2, uint32_t bar3,
 
             ide_state.drives[c].type = type;
             ide_state.drives[c].present = 1;
+            ide_state.drives[c].number = c;
             ide_state.drives[c].assigned_letter = 0;
 
             c++;
@@ -240,15 +239,16 @@ uint8_t ide_init(uint32_t bar0, uint32_t bar1, uint32_t bar2, uint32_t bar3,
     return 0;
 }
 
-uint8_t ide_read(uint8_t bus, uint8_t drive, uint32_t sector, uint8_t count, void *buf) {
-    if (bus > 1 || drive > 1 || count == 0) {
+uint8_t ide_read(uint8_t port, uint8_t drive, uint64_t sector, uint8_t count, void *buf) {
+    sector = (uint32_t)sector;
+    if (port > 1 || drive > 1 || count == 0) {
         return 1;
     }
-    if (!ide_drive_present(bus, drive)) {
+    if (!ide_drive_present(port, drive)) {
         return 1;
     }
 
-    uint8_t channel = bus;
+    uint8_t channel = port;
     uint8_t slave = drive;
 
     ide_write_reg(channel, ATA_REG_CONTROL, channels[channel].n_ien = (ide_irq == 0) ? 1 : 0);
@@ -274,15 +274,16 @@ uint8_t ide_read(uint8_t bus, uint8_t drive, uint32_t sector, uint8_t count, voi
     return 0;
 }
 
-uint8_t ide_write(uint8_t bus, uint8_t drive, uint32_t sector, uint8_t count, const void *buf) {
-    if (bus > 1 || drive > 1 || count == 0) {
+uint8_t ide_write(uint8_t port, uint8_t drive, uint64_t sector, uint8_t count, const void *buf) {
+    sector = (uint32_t)sector;
+    if (port > 1 || drive > 1 || count == 0) {
         return 1;
     }
-    if (!ide_drive_present(bus, drive)) {
+    if (!ide_drive_present(port, drive)) {
         return 1;
     }
 
-    uint8_t channel = bus;
+    uint8_t channel = port;
     uint8_t slave = drive;
 
     ide_write_reg(channel, ATA_REG_CONTROL, channels[channel].n_ien = (ide_irq == 0) ? 1 : 0);
@@ -315,12 +316,12 @@ uint8_t ide_write(uint8_t bus, uint8_t drive, uint32_t sector, uint8_t count, co
     return 0;
 }
 
-uint8_t ide_drive_present(uint8_t bus, uint8_t drive) {
-    if (bus > 1 || drive > 1) {
+uint8_t ide_drive_present(uint8_t port, uint8_t drive) {
+    if (port > 1 || drive > 1) {
         return 0;
     }
 
-    uint8_t index = bus * 2 + drive;
+    uint8_t index = port * 2 + drive;
     if (index >= 4) {
         return 0;
     }
@@ -328,12 +329,12 @@ uint8_t ide_drive_present(uint8_t bus, uint8_t drive) {
     return ide_state.drives[index].present;
 }
 
-char ide_drive_letter(uint8_t bus, uint8_t drive) {
-    if (bus > 1 || drive > 1) {
+char ide_drive_letter(uint8_t port, uint8_t drive) {
+    if (port > 1 || drive > 1) {
         return 0;
     }
 
-    uint8_t index = bus * 2 + drive;
+    uint8_t index = port * 2 + drive;
     if (index >= 4) {
         return 0;
     }
@@ -341,15 +342,22 @@ char ide_drive_letter(uint8_t bus, uint8_t drive) {
     return ide_state.drives[index].assigned_letter;
 }
 
-void ide_set_drive_letter(uint8_t bus, uint8_t drive, char letter) {
-    if (bus > 1 || drive > 1) {
+void ide_set_drive_letter(uint8_t port, uint8_t drive, char letter) {
+    if (port > 1 || drive > 1) {
         return;
     }
 
-    uint8_t index = bus * 2 + drive;
+    uint8_t index = port * 2 + drive;
     if (index >= 4) {
         return;
     }
 
     ide_state.drives[index].assigned_letter = letter;
+}
+
+ide_drive_info_t *ide_get_device(uint8_t index) {
+    if (index >= 4) {
+        return NULL;
+    }
+    return &ide_state.drives[index];
 }

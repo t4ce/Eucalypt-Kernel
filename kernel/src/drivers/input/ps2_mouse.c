@@ -5,11 +5,10 @@
 #include <idt/idt.h>
 #include <stdint.h>
 
+#define PS2_MOUSE_IRQ        12
+
 #define PS2_DATA_PORT        0x60
 #define PS2_CONTROL_PORT     0x64
-
-#define PS2_MOUSE_IRQ        12
-#define PS2_MOUSE_VECTOR     0x2C
 
 #define MOUSE_LEFT_BUTTON    0x01
 #define MOUSE_RIGHT_BUTTON   0x02
@@ -25,8 +24,6 @@ static uint8_t mouse_buttons = 0;
 
 static uint8_t mouse_packet[3];
 static uint8_t mouse_packet_idx = 0;
-
-extern void ps2_mouse_handler(void);
 
 static void ps2_wait_write(void) {
     for (int i = 0; i < 100000; i++) {
@@ -193,9 +190,7 @@ void ps2_mouse_init(void) {
     ps2_write_command(0xD4);
     ps2_write_data(0xF4);
     ps2_read_data(); // ACK
-    
-    // Register interrupt handler
-    idt_set_descriptor(PS2_MOUSE_VECTOR, ps2_mouse_handler, 0x8E);
+
     ioapic_unmask(PS2_MOUSE_IRQ);
     
     log_info("PS2 mouse initialized\n");

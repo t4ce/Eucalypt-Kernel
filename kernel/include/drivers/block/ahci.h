@@ -226,8 +226,10 @@ typedef struct {
     uint8_t count;
 } ahci_state_t;
 
-uint8_t ahci_read(uint8_t controller, uint8_t port, uint32_t sector, uint8_t count, void *buf);
-uint8_t ahci_write(uint8_t controller, uint8_t port, uint32_t sector, uint8_t count, const void *buf);
+uint8_t ahci_read(uint8_t controller, uint8_t port, uint64_t sector, uint8_t count, void *buf);
+uint8_t ahci_write(uint8_t controller, uint8_t port, uint64_t sector, uint8_t count, const void *buf);
 uint8_t ahci_init();
 uint8_t ahci_get_controller_count();
 ahci_controller_t *ahci_get_controller(uint8_t index);
+uint8_t ahci_get_port_count(uint8_t controller);
+uint8_t ahci_get_port_index(uint8_t controller, uint8_t n);

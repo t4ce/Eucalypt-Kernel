@@ -148,7 +148,7 @@ static int find_cmdslot(HBA_PORT *port) {
     return -1;
 }
 
-uint8_t ahci_read(uint8_t controller, uint8_t port, uint32_t sector, uint8_t count, void *buf) {
+uint8_t ahci_read(uint8_t controller, uint8_t port, uint64_t sector, uint8_t count, void *buf) {
     if (count == 0)
         return 1;
 
@@ -238,7 +238,7 @@ uint8_t ahci_read(uint8_t controller, uint8_t port, uint32_t sector, uint8_t cou
     return 0;
 }
 
-uint8_t ahci_write(uint8_t controller, uint8_t port, uint32_t sector, uint8_t count, const void *buf) {
+uint8_t ahci_write(uint8_t controller, uint8_t port, uint64_t sector, uint8_t count, const void *buf) {
     if (count == 0)
         return 1;
 
@@ -401,4 +401,31 @@ ahci_controller_t *ahci_get_controller(uint8_t index) {
     if (index >= g_ahci.count)
         return NULL;
     return &g_ahci.controllers[index];
+}
+
+uint8_t ahci_get_port_count(uint8_t controller) {
+    if (controller >= g_ahci.count)
+        return 0;
+
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < AHCI_MAX_PORTS; i++) {
+        if (g_ahci.controllers[controller].ports[i].present)
+            count++;
+    }
+    return count;
+}
+
+uint8_t ahci_get_port_index(uint8_t controller, uint8_t n) {
+    if (controller >= g_ahci.count)
+        return 0xFF;
+
+    uint8_t found = 0;
+    for (uint8_t i = 0; i < AHCI_MAX_PORTS; i++) {
+        if (g_ahci.controllers[controller].ports[i].present) {
+            if (found == n)
+                return i;
+            found++;
+        }
+    }
+    return 0xFF;
 }

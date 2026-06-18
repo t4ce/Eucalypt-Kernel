@@ -11,11 +11,15 @@
 #include <ipc/signal.h>
 #include <idt/idt.h>
 
-#define APIC_TIMER_VECTOR 0x20
-#define SYSCALL_VECTOR    0x80
+#define APIC_TIMER_VECTOR    0x20
+#define SYSCALL_VECTOR       0x80
+#define PS2_KEYBOARD_VECTOR  0x21
+#define PS2_MOUSE_VECTOR     0x2C
 
 extern void apic_handler();
 extern void int128_handler();
+extern void ps2_keyboard_handler();
+extern void ps2_mouse_handler();
 
 typedef struct {
     uint16_t isr_low;
@@ -70,6 +74,8 @@ void idt_init(void) {
 
     idt_set_descriptor(APIC_TIMER_VECTOR, apic_handler,   0x8E);
     idt_set_descriptor(SYSCALL_VECTOR,    int128_handler, 0xEE);
+    idt_set_descriptor(PS2_KEYBOARD_VECTOR, ps2_keyboard_handler, 0x8E);
+    idt_set_descriptor(PS2_MOUSE_VECTOR, ps2_mouse_handler, 0x8E);
 
     outb(0x21, 0xFF);
     outb(0xA1, 0xFF);
