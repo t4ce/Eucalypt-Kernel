@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdbool.h>
 #include <portio.h>
 #include <logging/printk.h>
 #include <drivers/pci.h>
@@ -145,4 +146,49 @@ void check_all_buses(void) {
     for (bus = 0; bus < 256; bus++) {
         check_bus((uint8_t)bus);
     }
+}
+
+static void pci_log_function_id(uint8_t bus, uint8_t device, uint8_t function) {
+    uint16_t vendor = pci_check_vendor(bus, device, function);
+
+    if (vendor == PCI_VENDOR_NONE) {
+        return;
+    }
+
+    uint16_t device_id = pci_get_device_id(bus, device, function);
+    log_info("PCI: %02x:%02x.%u VID %04x PID %04x\n",
+             bus, device, function, vendor, device_id);
+}
+
+void pci_log_ids_once(void) {
+    static bool logged = false;
+
+    if (logged) {
+        return;
+    }
+    logged = true;
+
+    log_info("PCI: VID/PID enumeration begin\n");
+
+    for (uint16_t bus = 0; bus < 256; bus++) {
+        for (uint8_t device = 0; device < 32; device++) {
+            uint16_t vendor = pci_check_vendor((uint8_t)bus, device, 0);
+            if (vendor == PCI_VENDOR_NONE) {
+                continue;
+            }
+
+            pci_log_function_id((uint8_t)bus, device, 0);
+
+            uint8_t header_type = pci_get_header_type((uint8_t)bus, device, 0);
+            if (!(header_type & PCI_HEADER_MULTIFUNCTION)) {
+                continue;
+            }
+
+            for (uint8_t function = 1; function < 8; function++) {
+                pci_log_function_id((uint8_t)bus, device, function);
+            }
+        }
+    }
+
+    log_info("PCI: VID/PID enumeration end\n");
 }

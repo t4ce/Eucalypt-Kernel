@@ -94,5 +94,6 @@ void check_function(uint8_t bus, uint8_t device, uint8_t function, uint8_t class
 void check_device(uint8_t bus, uint8_t device);
 void check_bus(uint8_t bus);
 void check_all_buses(void);
+void pci_log_ids_once(void);
 
 #endif

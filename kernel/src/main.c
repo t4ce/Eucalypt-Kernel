@@ -20,6 +20,7 @@
 #include <drivers/pci.h>
 #include <drivers/block/ahci.h>
 #include <drivers/block/ramfs.h>
+#include <drivers/acpi.h>
 #include <drivers/fs/vfs/vfs.h>
 #include <drivers/fs/devfs/devfs.h>
 #include <drivers/tty.h>
@@ -93,6 +94,8 @@ void kmain(void) {
     log_info("IDT initialized\n");
     hhdm_init();
     log_info("HHDM initialized\n");
+    acpi_log_tables();
+    pci_log_ids_once();
     frame_init();
     log_info("Frame allocator initialized\n");
     paging_init();
