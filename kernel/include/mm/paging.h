@@ -26,3 +26,4 @@ paddr paging_create_pml4();
 paddr paging_fork_pml4(paddr parent_cr3_phys);
 uint64_t *paging_get_current_pml4();
 void paging_init();
+void paging_init_per_cpu();

@@ -26,6 +26,7 @@
 #include <drivers/tty.h>
 #include <drivers/input.h>
 #include <drivers/fs/gpt.h>
+#include <smp.h>
 
 extern void enable_sse();
 
@@ -122,6 +123,8 @@ void kmain(void) {
     log_info("RAMFS initialized\n");
     gpt_init();
     log_info("GPT initialized\n");
+    smp_init();
+    log_info("SMP initialized\n");    
 
     if (!ramfs_addr || ramfs_size == 0) {
         log_error("No ramfs module loaded\n");

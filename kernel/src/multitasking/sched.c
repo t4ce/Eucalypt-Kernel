@@ -42,6 +42,7 @@ bool enqueue(struct tcb *thread) {
     tq->threads[tq->rear] = thread;
     tq->rear = (tq->rear + 1) % MAX_THREADS;
     tq->count++;
+
     return true;
 }
 
@@ -50,6 +51,7 @@ struct tcb *dequeue(void) {
     struct tcb *thread = tq->threads[tq->front];
     tq->front = (tq->front + 1) % MAX_THREADS;
     tq->count--;
+
     return thread;
 }
 
@@ -63,7 +65,10 @@ void sched_sleep(struct tcb *t) {
 }
 
 void sched_wake(struct tcb *t) {
-    t->state = running;
+    if (t->state != blocked) {
+        return;
+    }
+    t->state = ready;
     enqueue(t);
 }
 
@@ -72,7 +77,11 @@ uintptr_t schedule(uintptr_t rsp) {
 
     if (current_thread == NULL) {
         current_thread = dequeue();
-        if (!current_thread) return rsp;
+        if (!current_thread) {
+            log_debug("schedule: queue empty, nothing to run\n");
+            return rsp;
+        }
+        current_thread->state = running;
         tss.rsp0 = (uintptr_t)current_thread->stack_base + KERNEL_STACK_SIZE;
         __asm__ volatile("mov %0, %%cr3" :: "r"(current_thread->cr3));
         return current_thread->rsp;
@@ -81,21 +90,27 @@ uintptr_t schedule(uintptr_t rsp) {
     if (rsp != 0) current_thread->rsp = rsp;
 
     if (current_thread->state == dead) {
+        log_debug("schedule: freeing dead tid=%d\n", current_thread->tid);
         if (current_thread->ustack_base) kfree(current_thread->ustack_base);
         if (current_thread->stack_base)  kfree(current_thread->stack_base);
         kfree(current_thread);
         current_thread = NULL;
-    } else if (current_thread->state == running) {
+    } else if (current_thread->state != blocked) {
+        current_thread->state = ready;
         enqueue(current_thread);
+    } else {
+        log_debug("schedule: tid=%d staying blocked, not requeued\n", current_thread->tid);
     }
 
     if (tq->count == 0) {
+        log_debug("schedule: queue empty after preempt, halting\n");
         current_thread = NULL;
         __asm__ volatile("sti; hlt");
         return rsp;
     }
 
     current_thread = dequeue();
+    current_thread->state = running;
     tss.rsp0 = (uintptr_t)current_thread->stack_base + KERNEL_STACK_SIZE;
 
     paddr current_cr3;

@@ -21,32 +21,7 @@ extern void int128_handler();
 extern void ps2_keyboard_handler();
 extern void ps2_mouse_handler();
 
-typedef struct {
-    uint16_t isr_low;
-    uint16_t kernel_cs;
-    uint8_t  ist;
-    uint8_t  attributes;
-    uint16_t isr_mid;
-    uint32_t isr_high;
-    uint32_t reserved;
-} __attribute__((packed)) idt_entry_t;
-
-typedef struct {
-    uint16_t limit;
-    uint64_t base;
-} __attribute__((packed)) idtr_t;
-
-typedef struct {
-    uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
-    uint64_t rbp, rdi, rsi, rdx, rcx, rbx, rax;
-    uint64_t vector;
-    uint64_t error_code;
-    uint64_t rip;
-    uint64_t cs;
-    uint64_t rflags;
-    uint64_t rsp;
-    uint64_t ss;
-} __attribute__((packed)) interrupt_frame_t;
+idt_per_cpu_t *idt_per_cpu_data[100];
 
 __attribute__((aligned(0x10)))
 static idt_entry_t idt[256];
@@ -79,12 +54,18 @@ void idt_init(void) {
 
     outb(0x21, 0xFF);
     outb(0xA1, 0xFF);
+
     __asm__ volatile ("lidt %0" :: "m"(idtr));
     __asm__ volatile ("sti");
 }
 
 void idt_init_per_cpu() {
-    
+    idtr_t local_idtr = {
+        .base  = (uintptr_t)&idt[0],
+        .limit = sizeof(idt_entry_t) * 256 - 1,
+    };
+    __asm__ volatile ("lidt %0" :: "m"(local_idtr));
+    __asm__ volatile ("sti");
 }
 
 void exit_syscall(interrupt_frame_t *f) {
@@ -92,11 +73,9 @@ void exit_syscall(interrupt_frame_t *f) {
     if (!proc) {
         return;
     }
-
     if (!proc->signal_pending) {
         return;
     }
-
     for (int i = 0; i < NSIG; i++) {
         if (!(proc->signal_pending & (1U << i))) {
             continue;
@@ -116,10 +95,8 @@ static void exception_handler(interrupt_frame_t *f) {
     uint64_t cr2 = 0, cr3 = 0;
     __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
     __asm__ volatile ("mov %%cr3, %0" : "=r"(cr3));
-
     uint64_t *pml4 = (uint64_t *)cr3;
 
-    // Check for a pagefault
     if (f->vector == 0xE) {
         if (cr2 > 0xFFFFFFFF80000000) {
             paging_map_page(pml4, cr2, frame_alloc(), 0x1000, ENTRY_FLAG_PRESENT | ENTRY_FLAG_RW);
@@ -129,12 +106,11 @@ static void exception_handler(interrupt_frame_t *f) {
             if (!proc) {
                 return;
             }
-
             proc_destroy(proc);
             return;
         }
     }
-    
+
     panic("Exception %u, error %u, RIP=%#018llx, CR2=%#018llx, CR3=%#018llx",
           (unsigned)f->vector,
           (unsigned)f->error_code,

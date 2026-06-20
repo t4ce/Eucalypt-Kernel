@@ -6,7 +6,7 @@ extern void reload();
 #define KERNEL_STACK_SIZE 65536
 
 uint8_t gdt[7][8];
-per_cpu_t *per_cpu_data[100];
+gdt_per_cpu_t *per_cpu_data[100];
 
 struct [[gnu::packed]] gdtr {
     uint16_t limit;
@@ -96,7 +96,7 @@ void gdt_init() {
     asm volatile ("ltr %0" :: "r"((uint16_t)0x28));
 }
 
-void gdt_init_percpu(per_cpu_t *cpu_data) {
+void gdt_init_percpu(gdt_per_cpu_t *cpu_data) {
     if (!cpu_data) {
         return;
     }

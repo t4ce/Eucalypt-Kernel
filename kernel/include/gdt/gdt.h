@@ -24,10 +24,10 @@ typedef struct {
     uint8_t gdt[7][8];
     tss_t tss;
     uint8_t stack[65536] __attribute__((aligned(16)));
-} per_cpu_t;
+} gdt_per_cpu_t;
 
 extern tss_t tss;
-extern per_cpu_t *per_cpu_data[100];
+extern gdt_per_cpu_t *per_cpu_data[100];
 
 void gdt_init();
-void gdt_init_percpu(per_cpu_t *cpu_data);
+void gdt_init_percpu(gdt_per_cpu_t *cpu_data);

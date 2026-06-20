@@ -30,8 +30,8 @@ void ap_entry(uint64_t pid) {
     if (per_cpu_data[pid]) {
         gdt_init_percpu(per_cpu_data[pid]);
     }
-    idt_init();
-    paging_init();
+    idt_init_per_cpu();
+    paging_init_per_cpu();
     enable_apic(pid, false);
     apic_timer_init(1000);
     ioapic_init();
@@ -54,8 +54,7 @@ uint8_t smp_init() {
         uint8_t lid = mp_response->cpus[i]->lapic_id;
         uint64_t reserved = mp_response->cpus[i]->reserved;
 
-        // Allocate per-CPU data structure (contains GDT, TSS, and stack)
-        per_cpu_data[pid] = (per_cpu_t *)kmalloc(sizeof(per_cpu_t));
+        per_cpu_data[pid] = (gdt_per_cpu_t *)kmalloc(sizeof(gdt_per_cpu_t));
         if (!per_cpu_data[pid]) {
             log_debug("Failed to allocate per-CPU data for CPU %d\n", pid);
             return 1;

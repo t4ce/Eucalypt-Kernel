@@ -183,6 +183,10 @@ void paging_init() {
     for (uint64_t addr = 0; addr < 0x400000; addr += 0x1000)
         map_page(pml4, addr, addr, ENTRY_FLAG_PRESENT | ENTRY_FLAG_RW);
 
-    __asm__ volatile("mov %%cr3, %0\n\t"
-                     "mov %0, %%cr3" : "=r"(cr3) :: "memory");
+    __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
+}
+
+void paging_init_per_cpu() {
+    uint64_t kernel_cr3 = (uint64_t)kernel_pml4 - offset;
+    __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_cr3) : "memory");
 }

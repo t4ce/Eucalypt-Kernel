@@ -28,8 +28,6 @@ static const sig_default_action_t default_actions[NSIG] = {
     [SIGTTOU] = SIG_ACTION_STOP,
 };
 
-
-
 void default_sig_handler(int sig) {
     switch (default_actions[sig]) {
         case SIG_ACTION_TERMINATE:
