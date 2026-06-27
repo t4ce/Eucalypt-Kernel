@@ -120,6 +120,7 @@ uintptr_t schedule(uintptr_t rsp) {
         next->state = running;
         sched_cpus[id].current = next;
         tss.rsp0 = kernel_stack_top(next);
+        next->owning_cpu = id;
         spinlock_release(&sched_lock);
         __asm__ volatile("mov %0, %%cr3" :: "r"(next->cr3));
         return next->rsp;
@@ -151,6 +152,7 @@ uintptr_t schedule(uintptr_t rsp) {
     struct tcb *next = dequeue();
     next->state = running;
     sched_cpus[id].current = next;
+    next->owning_cpu = id;
     tss.rsp0 = kernel_stack_top(next);
 
     spinlock_release(&sched_lock);

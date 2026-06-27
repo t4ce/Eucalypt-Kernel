@@ -1,3 +1,4 @@
+#include "drivers/block/ide.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <limine.h>
@@ -59,11 +60,19 @@ void idle_thread(void) {
     }
 }
 
-int test_thread() {
+int test_thread1() {
     for (;;) {
+        println(apic_id(), "I'm thread A", 0xFFFFFFFF);
+    }
+}
+
+int test_thread2() {
+    for (;;) {
+        println(apic_id(), "I'm thread B", 0xFFFFFFFF);
     }
     return 1;
 }
+
 
 uint64_t alloc_user_stack(uint64_t *cr3) {
     uint64_t user_stack_base = 0x70000000000;
@@ -116,6 +125,8 @@ void kmain(void) {
     log_info("IOAPIC initalized\n");
     apic_timer_init(1000);
     log_info("APIC timer initialized\n");
+    // ide_init(0, 0, 0, 0, 0);
+    // log_info("IDE initialized\n");
     ahci_init();
     log_info("AHCI initialized\n");
     enable_sse();
@@ -145,10 +156,11 @@ void kmain(void) {
 
     scheduler_init();
 
-    struct pcb *p = proc_create(test_thread, false);
+    struct pcb *p = proc_create(test_thread1, false);
     
-    for (int i = 0; i < 5; i++) {
-        add_thread(p, test_thread);
+    for (int i = 0; i < 50; i++) {
+        add_thread(p, test_thread1);
+        add_thread(p, test_thread2);
     }
 
     asm volatile ("sti");
