@@ -58,6 +58,7 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 
 uint64_t do_syscall(uint64_t syscall_num, uint64_t arg0, uint64_t arg1, uint64_t arg2,
                     uint64_t arg3, uint64_t arg4) {
+    log_info("Syscall: %d\n", syscall_num);
     if (syscall_num >= NR_SYSCALLS || !syscall_table[syscall_num]) {
         log_warn("Unknown syscall %llu\n", syscall_num);
         return (uint64_t)-1;

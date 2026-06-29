@@ -60,19 +60,6 @@ void idle_thread(void) {
     }
 }
 
-int test_thread1() {
-    for (;;) {
-        println(apic_id(), "I'm thread A", 0xFFFFFFFF);
-    }
-}
-
-int test_thread2() {
-    for (;;) {
-        println(apic_id(), "I'm thread B", 0xFFFFFFFF);
-    }
-    return 1;
-}
-
 
 uint64_t alloc_user_stack(uint64_t *cr3) {
     uint64_t user_stack_base = 0x70000000000;
@@ -97,6 +84,18 @@ extern struct flanterm_context *ft_ctx;
 void putchar(tty_t *tty, char c) {
     (void)tty;
     flanterm_write(ft_ctx, &c, 1);
+}
+
+uint64_t syscall(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) {
+    uint64_t result;
+    register uint64_t r8_arg = arg4;
+    asm volatile (
+        "int $0x80"
+        : "=a"(result)
+        : "a"(num), "D"(arg1), "S"(arg2), "d"(arg3), "r"(r8_arg)
+        : "memory"
+    );
+    return result;
 }
 
 void kmain(void) {
@@ -154,25 +153,43 @@ void kmain(void) {
         log_info("Ramfs mounted\n");
     }
 
-    scheduler_init();
-
-    struct pcb *p = proc_create(test_thread1, false);
-    
-    for (int i = 0; i < 50; i++) {
-        add_thread(p, test_thread1);
-        add_thread(p, test_thread2);
+    int fd = vfs_open("ram/build/USER", VFS_O_RDONLY);
+    if (fd < 0) {
+        log_error("Failed to open /ram/build/USER: %d\n", fd);
+        hcf();
     }
+
+    paddr user_cr3 = paging_create_pml4();
+    elf_load_info_t info = {0};
+    uint64_t entry = elf64_parse(fd, user_cr3, &info);
+    vfs_close(fd);
+
+    if (!entry) {
+        log_error("Failed to load ELF64 binary\n");
+        hcf();
+    }
+ 
+    info.execfn = "/ram/build/USER";
+    
+    log_info("Creating user thread: entry=%llx cr3=%llx\n", entry, user_cr3);
+    
+    char *argv[] = { "/ram/build/USER", NULL };
+    char *envp[] = { "PATH=/", NULL };
+
+    scheduler_init();
 
     asm volatile ("sti");
 
-    if (smp_init() != 0) {
-        log_error("SMP initialization failed\n");
-    } else {
-        log_info("SMP initialized\n");
-    }
+    //if (smp_init() != 0) {
+    //    log_error("SMP initialization failed\n");
+    //} else {
+    //    log_info("SMP initialized\n");
+    //}
 
     log_info("Scheduler enabled\n");
     enable_sched();
+
+    proc_create_loaded_user(entry, user_cr3, argv, envp, &info);
 
     for (;;) {
         __asm__ volatile("hlt");

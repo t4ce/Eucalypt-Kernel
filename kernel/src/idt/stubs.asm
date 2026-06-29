@@ -107,26 +107,27 @@ apic_handler:
     mov rdi, rsp
     call apic_interrupt
     mov rsp, rax
-    pop r15 
-    pop r14 
-    pop r13 
+    pop r15
+    pop r14
+    pop r13
     pop r12
-    pop r11 
-    pop r10 
-    pop r9  
+    pop r11
+    pop r10
+    pop r9
     pop r8
-    pop rbp 
-    pop rdi 
-    pop rsi 
+    pop rbp
+    pop rdi
+    pop rsi
     pop rdx
-    pop rcx 
-    pop rbx 
+    pop rcx
+    pop rbx
     pop rax
     iretq
 
 int128_handler:
     push qword 0
     push qword 0x80
+
     push rax
     push rbx
     push rcx
@@ -143,18 +144,25 @@ int128_handler:
     push r14
     push r15
 
-    mov rdi, [rsp + iframe.rax]
-    mov rsi, [rsp + iframe.rdi]
-    mov rdx, [rsp + iframe.rsi]
-    mov rcx, [rsp + iframe.rdx]
+    mov rax, [rsp + iframe.rax]
+    mov rdi, [rsp + iframe.rdi]
+    mov rsi, [rsp + iframe.rsi]
+    mov rdx, [rsp + iframe.rdx]
     mov r8,  [rsp + iframe.r8]
     mov r9,  [rsp + iframe.r9]
+    
+    mov r10, rdx
+    mov rdx, rsi
+    mov rsi, rdi
+    mov rdi, rax
+    mov rcx, r10
 
     call do_syscall
 
     mov [rsp + iframe.rax], rax
     mov rdi, rsp
     call exit_syscall
+
     pop r15
     pop r14
     pop r13
